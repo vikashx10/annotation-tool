@@ -1,0 +1,98 @@
+================================================================================
+ANNOTATION GUIDELINES — Document Layout Segmentation
+================================================================================
+
+TOTAL NUMBER OF IMAGES TO ANNOTATE
+----------------------------------
+1.2 million pages.
+
+WHAT YOU ARE DOING
+------------------
+You are marking layout regions on PDF pages. For each page, draw a box around
+each distinct layout element (e.g. a title, a paragraph, a table) and assign
+it one of the 12 classes below. The goal is to segment the page into these
+layout types so a model can learn document structure.
+
+
+THE 12 CLASSES
+--------------
+Use these labels when you draw a box:
+
+  0  Header         — Top-of-page header (logos, document title strip, etc.)
+  1  Footer         — Bottom-of-page footer (page info, copyright, etc.)
+  2  Title         — Main document or section title (standalone heading)
+  3  Text          — Body paragraph or continuous text block
+  4  Table         — Any tabular content (rows/columns, spreadsheets)
+  5  Figure        — Image, diagram, chart, photo (not tables)
+  6  Caption       — Caption or label for a figure or table
+  7  Equation       — Mathematical formula or equation (display or inline block)
+  8  List Item     — Single bullet/numbered list entry
+  9  Page Number   — Page number only (e.g. "3" or "Page 3")
+ 10  Section Header — Subsection or minor heading (not the main title)
+ 11  Key-Value Pair — Form-like field: label + value (e.g. "Name: John", "Date: 01/01/2024")
+
+
+RULES
+-----
+• Draw a tight box around each element. One box = one layout region.
+• Use the class that best matches the content. When in doubt, pick the closest.
+• Mark every visible layout element you can reliably classify. Skip only if
+  the region is unclear or ambiguous.
+• If something fits two classes (e.g. a title inside a header), choose the
+  more specific one (e.g. Title if it’s the main title, Header if it’s part
+  of the header strip).
+• Save after each page when you finish marking it. Use “Finish PDF” when you
+  are done with all pages of that PDF.
+
+
+PAYMENT MODE
+------------
+• Total project payment: $8,000 (USD).
+
+• Payments are released in stages, subject to quality review at each milestone:
+
+  1. First tranche ($1,000): Released at project start. Annotate the initial
+     batch of pages. Once 100,000 pages are annotated, a quality check will
+     be performed on the annotations.
+
+  2. Second tranche ($4,000): Released after the first quality check is
+     passed. You will then receive the next batch of 500,000 pages to
+     annotate. A second quality check will be performed after this batch.
+
+  3. Final tranche ($3,000): Released after the second quality check is
+     passed. You will then receive the remaining pages to complete the
+     full 1.2 million pages.
+
+• Progression to the next stage and release of payment is contingent on
+  meeting the agreed quality standards at each milestone.
+
+
+QUICK REFERENCE
+---------------
+Header = top strip    |  Footer = bottom strip   |  Title = main heading
+Text = paragraph      |  Table = grid of cells   |  Figure = image/diagram
+Caption = under fig   |  Equation = math          |  List Item = bullet/num
+Page Number = “3”     |  Section Header = subheading
+Key-Value Pair = form field (label + value)
+
+
+BROAD CATEGORIES (SOURCE OF IMAGES)
+-----------------------------------
+Pages will be drawn from the following document categories. You may see any
+of these types; apply the same 12 layout classes to all.
+
+• Research and Scientific — Papers, journals, conference proceedings
+• Financial and Business — Reports, statements, audit documents
+• Medical and Healthcare — Clinical reports, guidelines, studies
+• Government and Public Records — Policy docs, gazettes, notifications
+• Legal Documents — Judgments, contracts, rulings
+• Archive and Historical — Scanned archives, manuscripts
+• Presentations and Slides — Decks, lecture slides, training materials
+• Manuals and Engineering — Technical manuals, specs, SOPs
+• Multilingual Documents — Chinese, Japanese, Arabic, and other languages
+• Long Tail Structured PDFs — Mixed high-quality structured documents
+• Handwritten and Scanned — Handwritten notes, scanned documents
+• Newspapers (Dense Layouts) — Multi-column newspapers, dense text
+• Medical Prescriptions and Slips — Prescriptions, clinical slips, forms
+• Magazines and Periodicals — Magazine-style layouts, articles, ads
+

@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Annotation Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .image-info {
+            font-size: 18px;
+            font-weight: 600;
+            color: #495057;
+            min-width: 300px;
+        }
+
+        .pdf-info {
+            font-size: 14px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .canvas-container {
+            padding: 30px;
+            display: flex;
+            justify-content: center;
+            background: #f8f9fa;
+            position: relative;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            display: inline-block;
+            border: 3px solid #667eea;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            background: white;
+            pointer-events: none;
+            max-width: 95%;
+            width: fit-content;
+        }
+
+        .canvas-wrapper canvas {
+            pointer-events: auto;
+        }
+
+        #imageCanvas {
+            display: block;
+            width: 600px;
+            height: auto;
+            cursor: crosshair;
+            touch-action: none;
+            user-select: none;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+        }
+
+        .instructions {
+            padding: 20px 30px;
+            background: #e7f3ff;
+            border-top: 2px solid #b3d9ff;
+        }
+
+        .instructions h3 {
+            color: #004085;
+            margin-bottom: 10px;
+        }
+
+        .instructions ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .instructions li {
+            padding: 8px 0;
+            color: #004085;
+            font-size: 16px;
+        }
+
+        .instructions li:before {
+            content: "✓ ";
+            color: #28a745;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .class-selector {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            text-align: center;
+            max-width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .class-selector.show {
+            display: block;
+        }
+
+        .class-selector h3 {
+            margin-bottom: 20px;
+            color: #495057;
+        }
+
+        .class-selector-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .class-btn {
+            padding: 12px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            background: white;
+            color: #667eea;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .class-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+
+        .overlay.show {
+            display: block;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            display: none;
+            font-size: 16px;
+            font-weight: 600;
+            min-width: 250px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.show {
+            display: block;
+        }
+
+        .toast.success {
+            border-left: 5px solid #28a745;
+            color: #155724;
+        }
+
+        .toast.error {
+            border-left: 5px solid #dc3545;
+            color: #721c24;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .category-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .category-selector select {
+            padding: 8px 12px;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        /* Folder picker bar */
+        .folder-bar {
+            padding: 16px 30px;
+            background: #eef2ff;
+            border-bottom: 2px solid #c7d2fe;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .folder-bar label {
+            font-weight: 700;
+            color: #4338ca;
+            white-space: nowrap;
+        }
+
+        .folder-bar input[type="text"] {
+            flex: 1;
+            min-width: 250px;
+            padding: 10px 14px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            color: #1e1b4b;
+        }
+
+        .folder-bar input[type="text"]:focus {
+            outline: none;
+            border-color: #4338ca;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .folder-bar .folder-info {
+            font-size: 13px;
+            color: #6366f1;
+            white-space: nowrap;
+        }
+
+        /* Browse modal */
+        .browse-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+            z-index: 1001;
+            display: none;
+            width: 560px;
+            max-width: 95vw;
+            max-height: 80vh;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        .browse-modal.show {
+            display: flex;
+        }
+
+        .browse-modal-header {
+            padding: 20px 24px 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .browse-modal-header h3 {
+            margin: 0 0 10px;
+            color: #1e1b4b;
+        }
+
+        .browse-current-path {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            color: #6366f1;
+            background: #eef2ff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            word-break: break-all;
+        }
+
+        .browse-modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+            max-height: 400px;
+        }
+
+        .browse-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 24px;
+            cursor: pointer;
+            font-size: 15px;
+            color: #374151;
+            transition: background 0.15s;
+        }
+
+        .browse-item:hover {
+            background: #eef2ff;
+        }
+
+        .browse-item .folder-icon {
+            font-size: 18px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .browse-item.parent-dir {
+            font-weight: 600;
+            color: #6366f1;
+        }
+
+        .browse-modal-footer {
+            padding: 14px 24px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PDF Annotation Tool</h1>
+            <p>Annotate PDF pages with bounding boxes for layout classes</p>
+        </div>
+
+        <div class="folder-bar">
+            <label>PDF Folder:</label>
+            <input type="text" id="folderPathInput" placeholder="/path/to/your/pdfs"
+                   onkeypress="if(event.key==='Enter'){event.preventDefault();setFolder();}">
+            <button class="btn-primary" onclick="setFolder()" style="padding: 10px 18px;">Set</button>
+            <button class="btn-secondary" onclick="openBrowseModal()" style="padding: 10px 18px;">Browse</button>
+            <span class="folder-info" id="folderInfo"></span>
+        </div>
+
+        <div class="controls">
+            <div class="nav-buttons">
+                <div class="category-selector">
+                    <label style="font-weight: 600;">Category:</label>
+                    <select id="categorySelect" onchange="updateCategory()">
+                        <option value="">All categories</option>
+                    </select>
+                    <button class="btn-primary" onclick="loadNextPdf()">Load Next PDF</button>
+                    <div style="display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;">
+                        <span style="font-weight: 600; color: #495057;">PDF #</span>
+                        <input type="number" id="pdfNumberInput" min="1" placeholder="#"
+                               style="width: 80px; padding: 8px 10px; border: 2px solid #667eea; border-radius: 6px; font-size: 14px; font-weight: 600; text-align: center;"
+                               onkeypress="if(event.key==='Enter'){event.preventDefault();loadPdfByNumber();}">
+                        <button class="btn-primary" onclick="loadPdfByNumber()" style="padding: 8px 14px;">Go</button>
+                        <span id="pdfCounts" style="font-weight: 600; color: #495057;"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="image-info">
+                <div id="imageInfo">No PDF loaded. Click "Load Next PDF" to start.</div>
+                <div class="pdf-info" id="pdfInfo"></div>
+            </div>
+            <div class="nav-buttons">
+                <button class="btn-secondary" onclick="firstImage()" title="First Page" id="firstBtn" disabled>First</button>
+                <button class="btn-secondary" onclick="previousImage()" id="prevBtn" disabled>Previous</button>
+                <div style="display: inline-flex; align-items: center; gap: 8px; margin: 0 10px;">
+                    <span style="font-weight: 600; color: #495057;">Go to:</span>
+                    <input type="number" id="imageIndexInput" min="1"
+                           style="width: 80px; padding: 8px 12px; border: 2px solid #667eea; border-radius: 6px; font-size: 16px; font-weight: 600; text-align: center;"
+                           onkeypress="handleIndexKeypress(event)"
+                           onchange="goToImageByInput()" disabled>
+                    <button class="btn-primary" onclick="goToImageByInput()" style="padding: 8px 16px;" id="goBtn" disabled>Go</button>
+                </div>
+                <button class="btn-primary" onclick="nextImage()" id="nextBtn" disabled>Next</button>
+                <button class="btn-primary" onclick="lastImage()" title="Last Page" id="lastBtn" disabled>Last</button>
+            </div>
+        </div>
+
+        <div class="controls" style="border-top: 2px solid #e9ecef;">
+            <div class="nav-buttons">
+                <button class="btn-info" id="drawModeBtn" onclick="toggleDrawMode()">Draw Mode: OFF</button>
+                <button class="btn-success" onclick="saveAnnotations()" id="saveBtn" disabled>Save Changes</button>
+            </div>
+            <div class="nav-buttons">
+                <button class="btn-success" onclick="finishPdf()" id="finishBtn" disabled>Finish PDF</button>
+                <button class="btn-danger" onclick="skipPdf()" id="skipBtn" disabled>Skip PDF</button>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <div class="canvas-wrapper">
+                <canvas id="imageCanvas"></canvas>
+            </div>
+        </div>
+
+        <div class="overlay" id="overlay"></div>
+        <div class="class-selector" id="classSelector">
+            <h3>Select layout class:</h3>
+            <div class="class-selector-buttons" id="classButtons">
+                <!-- Will be populated by JS -->
+            </div>
+            <div style="margin-top: 15px;">
+                <button class="btn-danger" onclick="clearRegion()" style="background: #fd7e14;">Clear Region</button>
+                <button class="btn-secondary" onclick="cancelDrawing()" style="margin-left: 10px;">Cancel</button>
+            </div>
+        </div>
+
+        <div class="overlay" id="browseOverlay" style="z-index: 1000;"></div>
+        <div class="browse-modal" id="browseModal">
+            <div class="browse-modal-header">
+                <h3>Select Folder</h3>
+                <div class="browse-current-path" id="browseCurrent"></div>
+            </div>
+            <div class="browse-modal-body" id="browseList">
+                <!-- populated by JS -->
+            </div>
+            <div class="browse-modal-footer">
+                <button class="btn-secondary" onclick="closeBrowseModal()">Cancel</button>
+                <button class="btn-primary" onclick="selectBrowsedFolder()">Select This Folder</button>
+            </div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+
+        <div class="instructions">
+            <h3>Instructions:</h3>
+            <ul>
+                <li><strong>Load Next PDF:</strong> Click to load the next unprocessed PDF from your local directory</li>
+                <li><strong>Click on a bounding box</strong> to remove it (when Draw Mode is OFF)</li>
+                <li><strong>Enable Draw Mode</strong> and drag to draw a new bounding box around a layout element</li>
+                <li><strong>Select a class</strong> from the popup (Header, Footer, Table, etc.)</li>
+                <li><strong>Clear Region</strong> removes all annotations within the selected area</li>
+                <li>Use Previous/Next buttons to navigate between pages</li>
+                <li>Click <strong>Save Changes</strong> to save annotations for the current page</li>
+                <li>Click <strong>Finish PDF</strong> when done with all pages - marks as processed and loads next PDF</li>
+                <li><strong>Keyboard shortcuts:</strong> Left/Right: Previous/Next | Home/End: First/Last | S: Save & Next | D: Toggle Draw Mode</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Class names and colors (11 layout classes)
+        const CLASS_NAMES = {{ class_names | tojson }};
+        const CLASS_COLORS = [
+            '#1f77b4', // Header - blue
+            '#ff7f0e', // Footer - orange
+            '#2ca02c', // Title - green
+            '#00b894', // Text - greenish teal
+            '#9467bd', // Table - purple
+            '#8c564b', // Figure - brown
+            '#e377c2', // Caption - pink
+            '#7f7f7f', // Equation - gray
+            '#bcbd22', // List Item - yellow-green
+            '#17becf', // Page Number - cyan
+            '#ff1493', // Section - bright pink
+            '#00ced1', // Key-Value Pair - dark turquoise
+        ];
+
+        // ---- Folder management ----
+        let browsePath = '';
+
+        async function loadCurrentFolder() {
+            try {
+                const data = await fetch('/api/folder').then(r => r.json());
+                document.getElementById('folderPathInput').value = data.pdf_dir || '';
+                document.getElementById('folderInfo').textContent = data.pdf_dir ? `Output: ${data.output_dir}` : '';
+            } catch (e) {
+                console.error('Failed to load folder config:', e);
+            }
+        }
+
+        async function setFolder() {
+            const input = document.getElementById('folderPathInput');
+            const path = input.value.trim();
+            if (!path) {
+                showToast('Enter a folder path', 'error');
+                input.focus();
+                return;
+            }
+            try {
+                const response = await fetch('/api/folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pdf_dir: path })
+                });
+                const data = await response.json();
+                if (data.status === 'error') {
+                    showToast(data.message, 'error');
+                    return;
+                }
+                input.value = data.pdf_dir;
+                document.getElementById('folderInfo').textContent = `Output: ${data.output_dir}`;
+                showToast('Folder set! Reloading categories...', 'success');
+
+                // Reset UI state
+                currentPdfPath = null;
+                images = [];
+                annotations = [];
+                enableNavigation(false);
+                document.getElementById('imageInfo').textContent = 'No PDF loaded. Select a category and click "Load Next PDF".';
+                document.getElementById('pdfInfo').textContent = '';
+
+                // Reload categories
+                const select = document.getElementById('categorySelect');
+                select.innerHTML = '<option value="">All categories</option>';
+                currentCategory = '';
+                await loadCategories();
+                await refreshPdfCounts();
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function openBrowseModal() {
+            const currentVal = document.getElementById('folderPathInput').value.trim();
+            browsePath = currentVal || '';
+            await loadBrowseDir(browsePath);
+            document.getElementById('browseOverlay').classList.add('show');
+            document.getElementById('browseModal').classList.add('show');
+        }
+
+        function closeBrowseModal() {
+            document.getElementById('browseOverlay').classList.remove('show');
+            document.getElementById('browseModal').classList.remove('show');
+        }
+
+        async function loadBrowseDir(path) {
+            try {
+                const params = path ? `?path=${encodeURIComponent(path)}` : '';
+                const data = await fetch('/api/browse' + params).then(r => r.json());
+                if (data.status === 'error') {
+                    showToast(data.message, 'error');
+                    return;
+                }
+                browsePath = data.current;
+                document.getElementById('browseCurrent').textContent = data.current;
+
+                const list = document.getElementById('browseList');
+                list.innerHTML = '';
+
+                // Parent directory link
+                if (data.parent) {
+                    const parentItem = document.createElement('div');
+                    parentItem.className = 'browse-item parent-dir';
+                    parentItem.innerHTML = '<span class="folder-icon">..</span><span>Parent Directory</span>';
+                    parentItem.onclick = () => loadBrowseDir(data.parent);
+                    list.appendChild(parentItem);
+                }
+
+                // Subdirectories
+                if (data.dirs.length === 0 && !data.parent) {
+                    const empty = document.createElement('div');
+                    empty.style.padding = '20px 24px';
+                    empty.style.color = '#9ca3af';
+                    empty.textContent = 'No subdirectories found';
+                    list.appendChild(empty);
+                }
+
+                data.dirs.forEach(name => {
+                    const item = document.createElement('div');
+                    item.className = 'browse-item';
+                    item.innerHTML = `<span class="folder-icon">&#128193;</span><span>${name}</span>`;
+                    item.onclick = () => loadBrowseDir(data.current + '/' + name);
+                    list.appendChild(item);
+                });
+            } catch (error) {
+                showToast('Browse error: ' + error.message, 'error');
+            }
+        }
+
+        function selectBrowsedFolder() {
+            if (browsePath) {
+                document.getElementById('folderPathInput').value = browsePath;
+                closeBrowseModal();
+                setFolder();
+            }
+        }
+
+        // Wire up the browse overlay click-to-close
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('browseOverlay').addEventListener('click', closeBrowseModal);
+        });
+
+        // ---- Annotation state ----
+        let images = [];
+        let currentImageIndex = 0;
+        let currentImageName = '';
+        let annotations = [];
+        let drawMode = false;
+        let isDrawing = false;
+        let startX = 0;
+        let startY = 0;
+        let pendingBox = null;
+        let canvas, ctx;
+        let image = new Image();
+        let currentPdfPath = null;
+        let currentCategory = '';
+
+        // Batch annotation cache: { "page_0001": [...], "page_0002": [...], ... }
+        let annotationCache = {};
+
+        // Preloaded image cache: { "page_0001": Image, ... }
+        let preloadedImages = {};
+
+        // Toast notification function
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast show ${type}`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Initialize
+        window.onload = async function() {
+            canvas = document.getElementById('imageCanvas');
+            ctx = canvas.getContext('2d');
+
+            setupEventListeners();
+
+            const [_, __, pdfInfo, ___] = await Promise.all([
+                loadCategories(),
+                refreshPdfCounts(),
+                fetch('/api/current_pdf').then(r => r.json()),
+                loadCurrentFolder(),
+            ]);
+
+            if (pdfInfo.pdf_path) {
+                currentPdfPath = pdfInfo.pdf_path;
+                await reloadImages();
+            }
+        };
+
+        async function loadCategories() {
+            try {
+                const response = await fetch('/api/categories');
+                const categories = await response.json();
+                const select = document.getElementById('categorySelect');
+                categories.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat;
+                    option.textContent = cat;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load categories:', error);
+            }
+        }
+
+        function updateCategory() {
+            currentCategory = document.getElementById('categorySelect').value;
+            refreshPdfCounts();
+        }
+
+        async function refreshPdfCounts() {
+            try {
+                const params = currentCategory ? `?category=${encodeURIComponent(currentCategory)}` : '';
+                const data = await fetch('/api/pdf_counts' + params).then(r => r.json());
+                const currentNum = data.processed + 1;
+                document.getElementById('pdfCounts').textContent = `of ${data.total}`;
+                document.getElementById('pdfNumberInput').value = currentNum;
+                document.getElementById('pdfNumberInput').max = data.total;
+            } catch (e) {
+                console.error('Failed to load PDF counts:', e);
+            }
+        }
+
+        async function loadPdfByNumber() {
+            const input = document.getElementById('pdfNumberInput');
+            const num = parseInt(input.value);
+            if (isNaN(num) || num < 1) {
+                showToast('Enter a valid PDF number', 'error');
+                return;
+            }
+            try {
+                showToast(`Loading PDF #${num}...`, 'success');
+                const response = await fetch('/api/load_pdf_by_number', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: currentCategory || null, number: num })
+                });
+                const data = await response.json();
+                if (data.status === 'empty' || data.status === 'error') {
+                    showToast(data.message, 'error');
+                    return;
+                }
+                currentPdfPath = data.pdf_path;
+                await reloadImages();
+                document.getElementById('pdfCounts').textContent = `of ${data.total}`;
+                input.value = data.number;
+                input.max = data.total;
+                showToast(`Loaded PDF #${data.number}: ${data.pdf_path.split('/').pop()}`, 'success');
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function loadNextPdf() {
+            if (!currentCategory) {
+                showToast('Please select a category first', 'error');
+                document.getElementById('categorySelect').focus();
+                return;
+            }
+            try {
+                showToast('Loading next PDF...', 'success');
+                const response = await fetch('/api/next_pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: currentCategory })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'empty') {
+                    showToast('No unprocessed PDFs found', 'error');
+                    currentPdfPath = null;
+                    enableNavigation(false);
+                    document.getElementById('imageInfo').textContent = 'All PDFs processed! No more remaining.';
+                    document.getElementById('pdfInfo').textContent = '';
+                    images = [];
+                    annotations = [];
+                    refreshPdfCounts();
+                    return;
+                }
+
+                if (data.status === 'error') {
+                    showToast(`Error: ${data.message}`, 'error');
+                    setTimeout(loadNextPdf, 1000);
+                    return;
+                }
+
+                currentPdfPath = data.pdf_path;
+                await reloadImages();
+                refreshPdfCounts();
+                showToast(`Loaded: ${data.pdf_path.split('/').pop()}`, 'success');
+            } catch (error) {
+                showToast('Error loading PDF: ' + error.message, 'error');
+            }
+        }
+
+        async function reloadImages() {
+            annotationCache = {};
+            preloadedImages = {};
+
+            try {
+                const [imagesResponse, annResponse, pdfInfo] = await Promise.all([
+                    fetch('/api/images'),
+                    fetch('/api/all_annotations'),
+                    fetch('/api/current_pdf').then(r => r.json()),
+                ]);
+
+                images = await imagesResponse.json();
+                annotationCache = await annResponse.json();
+
+                if (images.length > 0) {
+                    enableNavigation(true);
+                    loadImage(0);
+
+                    const pdfName = pdfInfo.pdf_path ? pdfInfo.pdf_path.split('/').pop() : 'Unknown';
+                    const parts = pdfInfo.pdf_path ? pdfInfo.pdf_path.split('/') : [];
+                    const category = parts.length > 1 ? parts[0] : '';
+                    document.getElementById('pdfInfo').textContent = `PDF: ${pdfName}` + (category ? ` | Category: ${category}` : '');
+                } else {
+                    enableNavigation(false);
+                    document.getElementById('imageInfo').textContent = 'No pages found';
+                }
+            } catch (error) {
+                showToast('Error loading images: ' + error.message, 'error');
+            }
+        }
+
+        function enableNavigation(enabled) {
+            document.getElementById('firstBtn').disabled = !enabled;
+            document.getElementById('prevBtn').disabled = !enabled;
+            document.getElementById('nextBtn').disabled = !enabled;
+            document.getElementById('lastBtn').disabled = !enabled;
+            document.getElementById('imageIndexInput').disabled = !enabled;
+            document.getElementById('goBtn').disabled = !enabled;
+            document.getElementById('saveBtn').disabled = !enabled;
+            document.getElementById('finishBtn').disabled = !enabled;
+            document.getElementById('skipBtn').disabled = !enabled;
+        }
+
+        function setupEventListeners() {
+            if (!canvas) {
+                console.error('Canvas not found!');
+                return;
+            }
+
+            canvas.addEventListener('mousedown', handleMouseDown, false);
+            canvas.addEventListener('mousemove', handleMouseMove, false);
+            canvas.addEventListener('mouseup', handleMouseUp, false);
+
+            canvas.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousedown', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                canvas.dispatchEvent(mouseEvent);
+            }, false);
+
+            canvas.addEventListener('touchmove', function(e) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousemove', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                canvas.dispatchEvent(mouseEvent);
+            }, false);
+
+            canvas.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                const mouseEvent = new MouseEvent('mouseup', {});
+                canvas.dispatchEvent(mouseEvent);
+            }, false);
+
+            document.getElementById('overlay').addEventListener('click', function() {
+                cancelDrawing();
+            });
+        }
+
+        // Preload adjacent pages for instant navigation
+        function preloadAdjacentPages(currentIndex) {
+            const toPreload = [
+                currentIndex - 1,
+                currentIndex + 1,
+                currentIndex + 2,
+                currentIndex + 3,
+            ].filter(i => i >= 0 && i < images.length);
+
+            toPreload.forEach(i => {
+                const key = images[i];
+                if (!preloadedImages[key]) {
+                    const img = new Image();
+                    img.src = `/api/image/${key}`;
+                    preloadedImages[key] = img;
+                }
+            });
+        }
+
+        function loadImage(index) {
+            if (index < 0 || index >= images.length) return;
+
+            currentImageIndex = index;
+            currentImageName = images[index];
+
+            const preloaded = preloadedImages[currentImageName];
+            if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {
+                image = preloaded;
+                canvas.width = image.width;
+                canvas.height = image.height;
+                annotations = annotationCache[currentImageName] || [];
+                drawImage();
+                updateImageInfo();
+                preloadAdjacentPages(currentImageIndex);
+                return;
+            }
+
+            image = new Image();
+            let retryCount = 0;
+            const maxRetries = 3;
+
+            image.onload = function() {
+                canvas.width = image.width;
+                canvas.height = image.height;
+                annotations = annotationCache[currentImageName] || [];
+                drawImage();
+                updateImageInfo();
+                preloadAdjacentPages(currentImageIndex);
+            };
+
+            image.onerror = function() {
+                retryCount++;
+                if (retryCount <= maxRetries) {
+                    setTimeout(() => {
+                        image.src = `/api/image/${currentImageName}?t=${Date.now()}`;
+                    }, 1000 * retryCount);
+                } else {
+                    showToast(`Failed to load page ${currentImageIndex + 1} after ${maxRetries} retries`, 'error');
+                }
+            };
+
+            image.src = `/api/image/${currentImageName}?t=${Date.now()}`;
+        }
+
+        function drawImage() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+            annotations.forEach((ann) => {
+                const x = (ann.x_center - ann.width / 2) * canvas.width;
+                const y = (ann.y_center - ann.height / 2) * canvas.height;
+                const w = ann.width * canvas.width;
+                const h = ann.height * canvas.height;
+
+                const color = CLASS_COLORS[ann.class_id] || '#000000';
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, w, h);
+            });
+
+            if (pendingBox) {
+                const x = (pendingBox.x_center - pendingBox.width / 2) * canvas.width;
+                const y = (pendingBox.y_center - pendingBox.height / 2) * canvas.height;
+                const w = pendingBox.width * canvas.width;
+                const h = pendingBox.height * canvas.height;
+
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(x, y, w, h);
+                ctx.setLineDash([]);
+            }
+        }
+
+        function updateImageInfo() {
+            document.getElementById('imageInfo').textContent =
+                `Page ${currentImageIndex + 1} of ${images.length} | ${currentImageName} | Boxes: ${annotations.length}`;
+
+            const indexInput = document.getElementById('imageIndexInput');
+            if (indexInput) {
+                indexInput.value = currentImageIndex + 1;
+                indexInput.max = images.length;
+            }
+        }
+
+        function nextImage() {
+            if (currentImageIndex < images.length - 1) {
+                loadImage(currentImageIndex + 1);
+            }
+        }
+
+        function previousImage() {
+            if (currentImageIndex > 0) {
+                loadImage(currentImageIndex - 1);
+            }
+        }
+
+        function firstImage() {
+            if (currentImageIndex > 0) {
+                loadImage(0);
+            }
+        }
+
+        function lastImage() {
+            if (currentImageIndex < images.length - 1) {
+                loadImage(images.length - 1);
+            }
+        }
+
+        function goToImageByInput() {
+            const input = document.getElementById('imageIndexInput');
+            const index = parseInt(input.value) - 1;
+
+            if (isNaN(index) || index < 0 || index >= images.length) {
+                showToast(`Please enter a number between 1 and ${images.length}`, 'error');
+                input.value = currentImageIndex + 1;
+                return;
+            }
+
+            if (index !== currentImageIndex) {
+                loadImage(index);
+            }
+        }
+
+        function handleIndexKeypress(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                goToImageByInput();
+            }
+        }
+
+        function toggleDrawMode() {
+            drawMode = !drawMode;
+            const btn = document.getElementById('drawModeBtn');
+            btn.textContent = `Draw Mode: ${drawMode ? 'ON' : 'OFF'}`;
+            btn.className = drawMode ? 'btn-success' : 'btn-info';
+            canvas.style.cursor = drawMode ? 'crosshair' : 'pointer';
+        }
+
+        function handleMouseDown(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (!canvas || canvas.width === 0 || canvas.height === 0) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+
+            if (canvasX < 0 || canvasX > canvas.width || canvasY < 0 || canvasY > canvas.height) return;
+
+            if (!drawMode) {
+                const normalizedX = canvasX / canvas.width;
+                const normalizedY = canvasY / canvas.height;
+
+                let boxRemoved = false;
+                for (let i = annotations.length - 1; i >= 0; i--) {
+                    const ann = annotations[i];
+                    const boxX = ann.x_center - ann.width / 2;
+                    const boxY = ann.y_center - ann.height / 2;
+                    const boxX2 = ann.x_center + ann.width / 2;
+                    const boxY2 = ann.y_center + ann.height / 2;
+
+                    if (normalizedX >= boxX && normalizedX <= boxX2 &&
+                        normalizedY >= boxY && normalizedY <= boxY2) {
+                        annotations.splice(i, 1);
+                        boxRemoved = true;
+                        break;
+                    }
+                }
+
+                if (boxRemoved) {
+                    drawImage();
+                    updateImageInfo();
+                }
+            } else {
+                pendingBox = null;
+                isDrawing = true;
+                startX = canvasX / canvas.width;
+                startY = canvasY / canvas.height;
+            }
+        }
+
+        function handleMouseMove(e) {
+            if (drawMode && isDrawing) {
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const currentX = ((e.clientX - rect.left) * scaleX) / canvas.width;
+                const currentY = ((e.clientY - rect.top) * scaleY) / canvas.height;
+
+                const x1 = Math.min(startX, currentX);
+                const y1 = Math.min(startY, currentY);
+                const x2 = Math.max(startX, currentX);
+                const y2 = Math.max(startY, currentY);
+
+                pendingBox = {
+                    x_center: (x1 + x2) / 2,
+                    y_center: (y1 + y2) / 2,
+                    width: x2 - x1,
+                    height: y2 - y1
+                };
+
+                drawImage();
+            }
+        }
+
+        function handleMouseUp(e) {
+            if (drawMode && isDrawing) {
+                e.preventDefault();
+                isDrawing = false;
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const endX = ((e.clientX - rect.left) * scaleX) / canvas.width;
+                const endY = ((e.clientY - rect.top) * scaleY) / canvas.height;
+
+                const x1 = Math.min(startX, endX);
+                const y1 = Math.min(startY, endY);
+                const x2 = Math.max(startX, endX);
+                const y2 = Math.max(startY, endY);
+
+                const width = x2 - x1;
+                const height = y2 - y1;
+
+                if (width > 0.01 && height > 0.01) {
+                    const x_center = x1 + width / 2;
+                    const y_center = y1 + height / 2;
+
+                    pendingBox = {
+                        x_center: x_center,
+                        y_center: y_center,
+                        width: width,
+                        height: height
+                    };
+
+                    showClassSelector();
+                    drawImage();
+                }
+            }
+        }
+
+        function showClassSelector() {
+            const buttonsDiv = document.getElementById('classButtons');
+            buttonsDiv.innerHTML = '';
+
+            CLASS_NAMES.forEach((name, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'class-btn';
+                btn.textContent = `${idx}: ${name}`;
+                btn.style.borderColor = CLASS_COLORS[idx];
+                btn.style.color = CLASS_COLORS[idx];
+                btn.onclick = () => selectClass(idx);
+                buttonsDiv.appendChild(btn);
+            });
+
+            document.getElementById('overlay').classList.add('show');
+            document.getElementById('classSelector').classList.add('show');
+        }
+
+        function selectClass(classId) {
+            if (pendingBox) {
+                annotations.push({
+                    class_id: classId,
+                    x_center: pendingBox.x_center,
+                    y_center: pendingBox.y_center,
+                    width: pendingBox.width,
+                    height: pendingBox.height
+                });
+
+                pendingBox = null;
+                document.getElementById('overlay').classList.remove('show');
+                document.getElementById('classSelector').classList.remove('show');
+
+                drawImage();
+                updateImageInfo();
+            }
+        }
+
+        function cancelDrawing() {
+            pendingBox = null;
+            document.getElementById('overlay').classList.remove('show');
+            document.getElementById('classSelector').classList.remove('show');
+            drawImage();
+        }
+
+        function clearRegion() {
+            if (pendingBox) {
+                const regionLeft = pendingBox.x_center - pendingBox.width / 2;
+                const regionRight = pendingBox.x_center + pendingBox.width / 2;
+                const regionTop = pendingBox.y_center - pendingBox.height / 2;
+                const regionBottom = pendingBox.y_center + pendingBox.height / 2;
+
+                let removedCount = 0;
+                annotations = annotations.filter(ann => {
+                    const boxLeft = ann.x_center - ann.width / 2;
+                    const boxRight = ann.x_center + ann.width / 2;
+                    const boxTop = ann.y_center - ann.height / 2;
+                    const boxBottom = ann.y_center + ann.height / 2;
+
+                    const overlaps = !(boxRight < regionLeft ||
+                                      boxLeft > regionRight ||
+                                      boxBottom < regionTop ||
+                                      boxTop > regionBottom);
+
+                    if (overlaps) {
+                        removedCount++;
+                        return false;
+                    }
+                    return true;
+                });
+
+                pendingBox = null;
+                document.getElementById('overlay').classList.remove('show');
+                document.getElementById('classSelector').classList.remove('show');
+
+                if (removedCount > 0) {
+                    showToast(`Removed ${removedCount} annotation(s)`, 'success');
+                } else {
+                    showToast('No annotations in region', 'error');
+                }
+
+                drawImage();
+                updateImageInfo();
+            }
+        }
+
+        async function saveAnnotations() {
+            try {
+                const response = await fetch(`/api/annotations/${currentImageName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ annotations: annotations })
+                });
+
+                if (response.ok) {
+                    annotationCache[currentImageName] = [...annotations];
+                    showToast('Saved successfully!', 'success');
+                } else {
+                    showToast('Error saving annotations', 'error');
+                }
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function finishPdf() {
+            try {
+                await saveAnnotations();
+
+                const response = await fetch('/api/finish_pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (response.ok) {
+                    showToast('PDF finished! Loading next...', 'success');
+                    await loadNextPdf();
+                } else {
+                    showToast('Error finishing PDF', 'error');
+                }
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function skipPdf() {
+            if (!confirm('Skip this PDF and mark as error?')) return;
+
+            try {
+                const response = await fetch('/api/skip_pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'Manually skipped by user' })
+                });
+
+                if (response.ok) {
+                    showToast('PDF skipped! Loading next...', 'success');
+                    await loadNextPdf();
+                } else {
+                    showToast('Error skipping PDF', 'error');
+                }
+            } catch (error) {
+                showToast('Error: ' + error.message, 'error');
+            }
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', async function(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                previousImage();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                nextImage();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                firstImage();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                lastImage();
+            } else if (e.key === 'd' || e.key === 'D') {
+                toggleDrawMode();
+            } else if (e.key === 's' || e.key === 'S') {
+                e.preventDefault();
+                await saveAnnotations();
+                nextImage();
+            }
+        });
+    </script>
+</body>
+</html>
