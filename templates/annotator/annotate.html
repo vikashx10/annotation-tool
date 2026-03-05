@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Annotate{% endblock %}
+{% block header_title %}Annotate Image{% endblock %}
+
+{% block content %}
+<div class="controls">
+    <div class="nav-buttons">
+        <button class="btn-info" id="drawModeBtn" onclick="toggleDraw()">Draw Mode: OFF</button>
+        <button class="btn-success" onclick="saveAndNext()" id="saveNextBtn">Save & Next</button>
+        <button class="btn-primary" onclick="saveOnly()">Save</button>
+    </div>
+    <div class="image-info">
+        <div id="imageInfo">Loading...</div>
+        <div id="progressInfo" style="font-size:13px; color:#6c757d;"></div>
+    </div>
+    <div class="nav-buttons">
+        <a href="{{ url_for('annotator.grid') }}" class="btn btn-secondary">Grid View</a>
+    </div>
+</div>
+
+<div class="canvas-container">
+    <div class="canvas-wrapper">
+        <canvas id="annotationCanvas"></canvas>
+    </div>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="class-selector" id="classSelector">
+    <h3>Select layout class:</h3>
+    <div class="class-selector-buttons" id="classButtons"></div>
+    <div style="margin-top: 15px;">
+        <button class="btn-danger" onclick="doClearRegion()" style="background: #fd7e14;">Clear Region</button>
+        <button class="btn-secondary" onclick="ac.cancelDrawing()" style="margin-left: 10px;">Cancel</button>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/canvas.js') }}"></script>
+<script>
+    const CLASS_NAMES = {{ class_names | tojson }};
+    const CLASS_COLORS = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#00b894', '#9467bd', '#8c564b',
+        '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#ff1493', '#00ced1',
+        '#d62728', '#8b008b',
+    ];
+
+    let currentImageId = {{ image_id | tojson }};
+
+    const ac = new AnnotationCanvas('annotationCanvas', {
+        classNames: CLASS_NAMES,
+        classColors: CLASS_COLORS,
+        readOnly: false,
+        onSave: async (imageId, annotations) => {
+            const resp = await fetch(`/api/annotations/${imageId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ annotations })
+            });
+            if (!resp.ok) throw new Error('Save failed');
+        },
+        onAnnotationsChanged: (anns) => {
+            updateInfo();
+        }
+    });
+
+    function toggleDraw() {
+        const on = ac.toggleDrawMode();
+        const btn = document.getElementById('drawModeBtn');
+        btn.textContent = `Draw Mode: ${on ? 'ON' : 'OFF'}`;
+        btn.className = on ? 'btn-success' : 'btn-info';
+    }
+
+    function doClearRegion() {
+        const count = ac.clearRegion();
+        if (count > 0) showToast(`Removed ${count} annotation(s)`, 'success');
+        else showToast('No annotations in region', 'error');
+    }
+
+    function updateInfo() {
+        const count = ac.getAnnotationCount();
+        document.getElementById('imageInfo').textContent =
+            currentImageId ? `Image #${currentImageId} | Boxes: ${count}` : 'No image loaded';
+    }
+
+    async function loadImage(imageId) {
+        if (!imageId) {
+            document.getElementById('imageInfo').textContent = 'No more images to annotate!';
+            document.getElementById('saveNextBtn').disabled = true;
+            return;
+        }
+        currentImageId = imageId;
+        try {
+            await ac.loadImage(imageId);
+            updateInfo();
+            // Update URL without reload
+            history.replaceState(null, '', `/annotator/annotate/${imageId}`);
+        } catch (e) {
+            showToast('Failed to load image', 'error');
+        }
+    }
+
+    async function saveOnly() {
+        if (!currentImageId) return;
+        const ok = await ac.save();
+        if (ok) showToast('Saved!', 'success');
+        else showToast('Save failed', 'error');
+    }
+
+    async function saveAndNext() {
+        if (!currentImageId) return;
+        try {
+            const resp = await fetch('/api/save_and_next', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_id: currentImageId,
+                    annotations: ac.getAnnotations()
+                })
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                showToast('Saved! Loading next...', 'success');
+                await loadImage(data.next_image_id);
+            } else {
+                showToast(data.message || 'All done!', 'success');
+                document.getElementById('imageInfo').textContent = 'All images annotated!';
+                document.getElementById('saveNextBtn').disabled = true;
+            }
+            loadProgress();
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    async function loadProgress() {
+        try {
+            const resp = await fetch('/annotator/progress');
+            const data = await resp.json();
+            const pct = data.total > 0 ? ((data.done / data.total) * 100).toFixed(1) : 0;
+            document.getElementById('progressInfo').textContent =
+                `Progress: ${data.done}/${data.total} (${pct}%)`;
+        } catch (e) {}
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', async function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === 'd' || e.key === 'D') {
+            toggleDraw();
+        } else if (e.key === 's' || e.key === 'S') {
+            e.preventDefault();
+            await saveAndNext();
+        }
+    });
+
+    // Init
+    loadImage(currentImageId);
+    loadProgress();
+</script>
+{% endblock %}

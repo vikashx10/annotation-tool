@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}OA Dashboard{% endblock %}
+{% block header_title %}OA Dashboard{% endblock %}
+
+{% block content %}
+<div class="section">
+    <!-- Stats -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div class="card" style="text-align:center;">
+            <h3>Assigned</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total_assigned }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Pending</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #6c757d;">{{ total_pending }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>To Review</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ total_annotated }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Approved</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ total_approved }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Rejected</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #dc3545;">{{ total_rejected }}</div>
+        </div>
+    </div>
+
+    {% if total_assigned > 0 %}
+    <div class="progress-bar-container">
+        <div class="progress-bar-fill" style="width: {{ (total_approved / total_assigned * 100) | round(1) }}%;">
+            {{ (total_approved / total_assigned * 100) | round(1) }}% approved
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Quick actions -->
+    <div class="card">
+        <h3>Actions</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            {% if total_annotated > 0 %}
+            <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Review Next ({{ total_annotated }})</a>
+            {% endif %}
+            <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary">View All Images</a>
+        </div>
+        {% if unassigned_to_annotator > 0 and annotator_stats %}
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef;">
+            <h3 style="margin-bottom:12px;">Distribute {{ unassigned_to_annotator }} Unassigned Images</h3>
+            <form method="POST" action="{{ url_for('oa.distribute') }}">
+                <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:end;">
+                    {% for stat in annotator_stats %}
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>{{ stat.user.username }}</label>
+                        <input type="number" name="count_{{ stat.user.id }}" min="0" max="{{ unassigned_to_annotator }}" value="0"
+                               style="width:100px; text-align:center;">
+                    </div>
+                    {% endfor %}
+                    <button type="submit" class="btn-warning">Distribute</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Add annotator -->
+    <div class="card">
+        <h3>Manage Annotators</h3>
+        {% if available_annotators %}
+        <form method="POST" action="{{ url_for('oa.add_annotator') }}" style="display:flex; gap:10px; align-items:end; margin-bottom:16px;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Add Annotator</label>
+                <select name="annotator_id" style="width:200px;">
+                    {% for a in available_annotators %}
+                    <option value="{{ a.id }}">{{ a.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Add</button>
+        </form>
+        {% else %}
+        <p style="color:#6c757d; margin-bottom:16px;">No available annotators to add.</p>
+        {% endif %}
+
+        {% if annotator_stats %}
+        <table>
+            <thead>
+                <tr><th>Annotator</th><th>Assigned</th><th>Done</th><th>Progress</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for stat in annotator_stats %}
+                <tr>
+                    <td>{{ stat.user.username }}</td>
+                    <td>{{ stat.assigned }}</td>
+                    <td>{{ stat.done }}</td>
+                    <td>
+                        {% if stat.assigned > 0 %}
+                        <div class="progress-bar-container" style="height:16px; width:120px; display:inline-block;">
+                            <div class="progress-bar-fill" style="width: {{ (stat.done / stat.assigned * 100) | round(1) }}%; font-size:10px;">
+                                {{ (stat.done / stat.assigned * 100) | round(0) }}%
+                            </div>
+                        </div>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ url_for('oa.deselect_annotator', annotator_id=stat.user.id) }}" style="display:inline;">
+                            <button type="submit" class="btn-warning btn-sm" onclick="return confirm('Remove pending images from {{ stat.user.username }}?');">Deselect</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('oa.remove_annotator', annotator_id=stat.user.id) }}" style="display:inline;">
+                            <button type="submit" class="btn-danger btn-sm" onclick="return confirm('Remove {{ stat.user.username }}?');">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:#6c757d;">No annotators managed yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

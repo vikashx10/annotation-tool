@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block header_title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="section">
+    <!-- Stats -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div class="card" style="text-align:center;">
+            <h3>Total Images</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total_images }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Assigned</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #17a2b8;">{{ total_assigned }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Under Review</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ total_under_review }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Completed</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ total_completed }}</div>
+        </div>
+    </div>
+
+    {% if total_images > 0 %}
+    <div class="progress-bar-container">
+        <div class="progress-bar-fill" style="width: {{ (total_completed / total_images * 100) if total_images > 0 else 0 }}%;">
+            {{ ((total_completed / total_images * 100) | round(1)) if total_images > 0 else 0 }}%
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Image Root -->
+    <div class="card">
+        <h3>Image Root Directory</h3>
+        <form method="POST" action="{{ url_for('admin.set_image_root') }}" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+            <div class="form-group" style="flex:1; margin-bottom:0;">
+                <input type="text" name="image_root" value="{{ image_root }}" placeholder="/path/to/images" required>
+            </div>
+            <button type="submit" class="btn-primary">Set & Scan</button>
+        </form>
+        {% if image_root %}
+        <form method="POST" action="{{ url_for('admin.rescan_images') }}" style="margin-top:8px;">
+            <button type="submit" class="btn-secondary btn-sm">Rescan Images</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <!-- Export -->
+    {% if total_completed > 0 %}
+    <div class="card">
+        <h3>Export</h3>
+        <a href="{{ url_for('admin.export_yolo') }}" class="btn btn-success">Export Approved YOLO ({{ total_completed }} images)</a>
+    </div>
+    {% endif %}
+
+    <!-- Create User -->
+    <div class="card">
+        <h3>Create User</h3>
+        <form method="POST" action="{{ url_for('admin.create_user') }}" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Username</label>
+                <input type="text" name="username" required style="width:200px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Password</label>
+                <input type="password" name="password" required style="width:200px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Role</label>
+                <select name="role" style="width:150px;">
+                    <option value="annotator">Annotator</option>
+                    <option value="oa">OA</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Create</button>
+        </form>
+    </div>
+
+    <!-- OA Overview -->
+    {% if oa_stats %}
+    <div class="card">
+        <h3>OA Overview</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>OA</th>
+                    <th>Assigned Images</th>
+                    <th>Completed</th>
+                    <th>Annotators</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat in oa_stats %}
+                <tr>
+                    <td>{{ stat.user.username }}</td>
+                    <td>{{ stat.assigned }}</td>
+                    <td>{{ stat.completed }}</td>
+                    <td>{{ stat.managed }}</td>
+                    <td><a href="{{ url_for('admin.user_detail', user_id=stat.user.id) }}" class="btn btn-info btn-sm">Details</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- All Users -->
+    <div class="card">
+        <h3>All Users</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.username }}</td>
+                    <td><span class="badge badge-{{ 'approved' if user.role == 'admin' else ('annotated' if user.role == 'oa' else 'pending') }}">{{ user.role }}</span></td>
+                    <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}</td>
+                    <td>
+                        <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-info btn-sm">Details</a>
+                        {% if user.id != current_user.id %}
+                        <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.id) }}" style="display:inline;" onsubmit="return confirm('Delete user {{ user.username }}?');">
+                            <button type="submit" class="btn-danger btn-sm">Delete</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

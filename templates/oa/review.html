@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Review{% endblock %}
+{% block header_title %}Review Annotations{% endblock %}
+
+{% block content %}
+<div class="controls">
+    <div class="image-info">
+        <div id="imageInfo">Loading...</div>
+    </div>
+    <div class="nav-buttons">
+        <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary">Grid View</a>
+        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">Dashboard</a>
+    </div>
+</div>
+
+<div class="canvas-container">
+    <div class="canvas-wrapper">
+        <canvas id="annotationCanvas"></canvas>
+    </div>
+</div>
+
+<div class="review-actions">
+    <button class="btn-success" onclick="doReview('approve')" id="approveBtn" style="padding: 14px 40px; font-size: 18px;">Approve</button>
+    <button class="btn-danger" onclick="doReview('reject')" id="rejectBtn" style="padding: 14px 40px; font-size: 18px;">Reject</button>
+</div>
+
+<!-- Overlay and class selector for read-only display (not used but kept for canvas.js compatibility) -->
+<div class="overlay" id="overlay" style="display:none;"></div>
+<div class="class-selector" id="classSelector" style="display:none;">
+    <div class="class-selector-buttons" id="classButtons"></div>
+</div>
+
+<script src="{{ url_for('static', filename='js/canvas.js') }}"></script>
+<script>
+    const CLASS_NAMES = {{ class_names | tojson }};
+    const CLASS_COLORS = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#00b894', '#9467bd', '#8c564b',
+        '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#ff1493', '#00ced1',
+        '#d62728', '#8b008b',
+    ];
+
+    let currentImageId = {{ image_id | tojson }};
+
+    const ac = new AnnotationCanvas('annotationCanvas', {
+        classNames: CLASS_NAMES,
+        classColors: CLASS_COLORS,
+        readOnly: true,
+    });
+
+    async function loadImage(imageId) {
+        if (!imageId) {
+            document.getElementById('imageInfo').textContent = 'No images to review!';
+            document.getElementById('approveBtn').disabled = true;
+            document.getElementById('rejectBtn').disabled = true;
+            return;
+        }
+        currentImageId = imageId;
+        try {
+            await ac.loadImage(imageId);
+            const count = ac.getAnnotationCount();
+            document.getElementById('imageInfo').textContent =
+                `Image #${imageId} | Annotations: ${count}`;
+            history.replaceState(null, '', `/oa/review/${imageId}`);
+        } catch (e) {
+            showToast('Failed to load image', 'error');
+        }
+    }
+
+    async function doReview(action) {
+        if (!currentImageId) return;
+        try {
+            const resp = await fetch(`/api/review/${currentImageId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                showToast(`${action === 'approve' ? 'Approved' : 'Rejected'}! Loading next...`, 'success');
+                await loadImage(data.next_image_id);
+            } else if (data.status === 'done') {
+                showToast('All images reviewed!', 'success');
+                document.getElementById('imageInfo').textContent = 'All images reviewed!';
+                document.getElementById('approveBtn').disabled = true;
+                document.getElementById('rejectBtn').disabled = true;
+            } else {
+                showToast(data.message || 'Error', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === 'a' || e.key === 'A') {
+            doReview('approve');
+        } else if (e.key === 'r' || e.key === 'R') {
+            doReview('reject');
+        }
+    });
+
+    loadImage(currentImageId);
+</script>
+{% endblock %}

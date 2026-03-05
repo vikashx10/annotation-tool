@@ -1,60 +1,55 @@
-# Local PDF Annotation Tool
+# Multi-Role Image Annotation Tool
 
-A Flask-based web application for annotating PDF pages with bounding boxes for layout segmentation classes. All data is read from and written to local directories -- no cloud services required.
+A Flask-based web application for annotating images with bounding boxes for layout segmentation classes. Features role-based access with Admin, OA (Quality Assurer), and Annotator roles. All data stored in SQLite.
 
 ## Overview
 
-This tool reads PDFs from a local directory, converts each page to an image, allows you to draw bounding boxes and assign them to one of 11 layout classes, and saves the annotations as YOLO format text files.
+This tool scans images (JPG/PNG) from a local directory, allows annotators to draw bounding boxes and assign layout classes, OAs to review and approve/reject annotations, and admins to manage users and export YOLO-format labels.
+
+### Roles
+
+- **Admin**: Manage users, set image root directory, view progress, export approved annotations
+- **OA (Quality Assurer)**: Manage annotators, distribute images, review annotations (approve/reject)
+- **Annotator**: Draw bounding boxes on assigned images, save annotations
 
 ### Input
 
-- **PDF directory**: A local folder containing PDF files, organized into category subdirectories.
+- **Image directory**: A local folder containing image files (JPG/PNG), optionally in nested subdirectories.
 
 ```
-pdfs/
-├── finance/
-│   ├── report1.pdf
-│   └── report2.pdf
-├── medical/
-│   └── document.pdf
-└── legal/
-    └── contract.pdf
+images/
+├── folder1/
+│   ├── page1.jpg
+│   └── page2.png
+├── folder2/
+│   └── document.jpg
+└── scan.png
 ```
-
-Categories are automatically detected as subdirectories of the PDF directory.
 
 ### Output
 
-- **Output directory**: YOLO label `.txt` files mirroring the PDF directory structure.
+- **YOLO export**: Admin can export approved images and label files as a zip.
 
-```
-output/
-├── finance/
-│   ├── report1_page_1.txt
-│   ├── report1_page_2.txt
-│   └── report2_page_1.txt
-├── medical/
-│   └── document_page_1.txt
-└── processed_pdfs.json
-```
+### Annotation Classes (14 total)
 
-### Annotation Classes (11 total)
-
-1. Header
-2. Footer
-3. Title
-4. Text
-5. Table
-6. Figure
-7. Caption
-8. Equation
-9. List Item
-10. Page Number
-11. Section Header
+0. Header
+1. Footer
+2. Title
+3. Text
+4. Table
+5. Figure
+6. Caption
+7. Equation
+8. List Item
+9. Page Number
+10. Section Header
+11. Key-Value Pair
+12. Signature
+13. Seal
 
 ### YOLO Label Format
 
-Each `.txt` file contains one line per bounding box:
+Each label file contains one line per bounding box:
 
 ```
 <class_id> <x_center> <y_center> <width> <height>
@@ -78,106 +73,95 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure Paths
-
-Edit the `.env` file:
-
-```text
-PDF_DIR=/path/to/your/pdfs
-OUTPUT_DIR=/path/to/your/output
-```
-
-- `PDF_DIR`: Directory containing your PDF files. Subdirectories become selectable categories.
-- `OUTPUT_DIR`: Where annotation `.txt` files and the `processed_pdfs.json` log are saved.
-
 ## Running the Application
 
 ```bash
 python app.py
 ```
 
-Then open your browser to: `http://localhost:8000`
+Open your browser to: `http://localhost:8000`
 
-On startup, the app prints the configured paths so you can verify them.
+On first run, the app creates the SQLite database and seeds default users:
+- **Admin**: `VioletSkeleton` / `Welcome@123`
+- **OA**: `UnsiloedOA1` / `Hello123`
+
+New annotators can self-register via the login page.
 
 ## Usage Workflow
 
-1. **Start the app** and open `http://localhost:8000` in your browser.
+### Admin
+1. Login as admin, set the **Image Root Directory** to scan images.
+2. Create OA and annotator users (or let them self-register).
+3. Images are auto-distributed to OAs when scanned.
+4. Monitor progress, export approved annotations as YOLO zip.
 
-2. **Select a category** from the dropdown (categories are auto-detected from subdirectories of `PDF_DIR`).
+### OA
+1. Add annotators to your team.
+2. Distribute images to annotators (specify count per annotator).
+3. Review submitted annotations — approve or reject.
+4. Rejected images go back to the annotator for fixing.
 
-3. **Load a PDF**: Click **"Load Next PDF"** to load the next unprocessed PDF, or enter a number and click **"Go"** to jump to a specific one.
+### Annotator
+1. Login or register as a new annotator.
+2. View assigned images in the **Grid View**.
+3. Click an image to annotate — draw bounding boxes, select classes.
+4. **Save & Next** to submit and move to the next image.
 
-4. **Annotate pages**:
-   - Navigate pages using Previous/Next buttons or arrow keys.
-   - **Draw Mode OFF**: Click on existing boxes to remove them.
-   - **Draw Mode ON**: Drag to draw rectangles around layout elements.
-   - After drawing, select a class from the popup.
-   - **Clear Region** removes all annotations overlapping the drawn area.
-
-5. **Save annotations**: Click **"Save Changes"** to write the current page's annotations to disk.
-
-6. **Finish PDF**: Click **"Finish PDF"** when done with all pages. This marks the PDF as processed and loads the next one.
-
-7. **Skip PDF**: Click **"Skip PDF"** to mark a corrupt or unwanted PDF as skipped.
+### Annotation Controls
+- **Draw Mode OFF**: Click on existing boxes to remove them.
+- **Draw Mode ON**: Drag to draw rectangles around layout elements.
+- After drawing, select a class from the popup.
+- **Clear Region** removes all annotations overlapping the drawn area.
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| Left / Right | Previous / Next page |
-| Home / End | First / Last page |
-| S | Save current page & go to next |
 | D | Toggle Draw Mode |
+| S | Save & Next |
+| A | Approve (OA review) |
+| R | Reject (OA review) |
 
 ## File Structure
 
 ```
 s3/
-├── app.py              # Flask backend
-├── templates/
-│   └── index.html      # Frontend UI
-├── requirements.txt    # Python dependencies
-├── .env                # Local path configuration
-├── README.md           # This file
-└── tmp_pages/          # Cached page images (auto-created, safe to delete)
-    └── <pdf_id>/
-        ├── page_0001.jpg
-        ├── page_0002.jpg
-        └── ...
+├── app.py                  # Flask app factory, blueprint registration
+├── models.py               # SQLAlchemy models (User, Image, Assignment, Annotation)
+├── auth.py                 # Flask-Login, login/logout/register, role_required decorator
+├── image_scanner.py        # Recursive image folder scanner
+├── routes_admin.py         # Admin blueprint
+├── routes_annotator.py     # Annotator blueprint
+├── routes_oa.py            # OA blueprint
+├── routes_api.py           # Shared API (image serving, annotations, review)
+├── requirements.txt        # Python dependencies
+├── instance/               # SQLite database (auto-created, gitignored)
+├── static/
+│   ├── css/style.css       # Shared styles
+│   ├── js/canvas.js        # AnnotationCanvas class
+│   ├── js/grid.js          # ImageGrid component
+│   └── thumbnails/         # Cached thumbnails (auto-created, gitignored)
+└── templates/
+    ├── base.html           # Shared layout with role-based nav
+    ├── login.html
+    ├── register.html
+    ├── admin/
+    │   ├── dashboard.html
+    │   └── user_detail.html
+    ├── annotator/
+    │   ├── annotate.html
+    │   └── grid.html
+    └── oa/
+        ├── dashboard.html
+        ├── review.html
+        └── grid.html
 ```
 
-## How It Works
+## Status Lifecycle
 
-### PDF Processing
+```
+pending → annotated → approved
+                   ↘ rejected → pending (loops back for fixing)
+```
 
-When you load a PDF:
-1. The app reads the PDF from your local `PDF_DIR`.
-2. Page 1 is converted to JPEG synchronously (so you see it immediately).
-3. Remaining pages are converted in the background.
-4. All page images are cached in `tmp_pages/` for fast re-access.
-
-### Annotation Storage
-
-Annotations are saved as YOLO-format `.txt` files in `OUTPUT_DIR`, mirroring the category/folder structure of `PDF_DIR`.
-
-### Processed Tracking
-
-The `processed_pdfs.json` file in `OUTPUT_DIR` tracks:
-- `processed`: List of PDF relative paths that have been finished.
-- `errors`: Dictionary of PDF relative paths that were skipped, with reasons.
-
-Any PDF in either list is skipped when loading the "next" PDF.
-
-## Troubleshooting
-
-### "No PDFs found"
-- Verify `PDF_DIR` in `.env` points to the correct directory.
-- Ensure PDFs are inside category subdirectories (e.g., `pdfs/finance/file.pdf`).
-
-### Images not loading
-- Check that `tmp_pages/` is writable.
-- Verify PyMuPDF is installed correctly (`pip install PyMuPDF`).
-
-### No categories showing
-- Categories are subdirectories of `PDF_DIR`. Make sure the directory has at least one subdirectory containing PDFs.
+Rejected images keep their existing annotations so the annotator can fix rather than redo.

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}My Images{% endblock %}
+{% block header_title %}My Assigned Images{% endblock %}
+
+{% block content %}
+<div class="controls">
+    <div class="image-info" id="statsInfo">Loading...</div>
+    <div class="nav-buttons">
+        <a href="{{ url_for('annotator.annotate') }}" class="btn btn-primary">Start Annotating</a>
+    </div>
+</div>
+
+<div class="progress-bar-container" style="margin: 0 30px;">
+    <div class="progress-bar-fill" id="progressBar" style="width: 0%;">0%</div>
+</div>
+
+<div class="image-grid" id="gridContainer">
+    <p style="color:#6c757d;">Loading...</p>
+</div>
+
+<script src="{{ url_for('static', filename='js/grid.js') }}"></script>
+<script>
+    const grid = new ImageGrid('gridContainer', {
+        fetchUrl: '{{ url_for("annotator.grid_data") }}',
+        onClick: (imageId) => {
+            window.location = `/annotator/annotate/${imageId}`;
+        }
+    });
+
+    async function loadGrid() {
+        try {
+            const resp = await fetch('{{ url_for("annotator.grid_data") }}');
+            const data = await resp.json();
+
+            document.getElementById('statsInfo').textContent =
+                `Total: ${data.total} | Pending: ${data.pending} | Done: ${data.done}`;
+
+            const pct = data.total > 0 ? ((data.done / data.total) * 100).toFixed(1) : 0;
+            const bar = document.getElementById('progressBar');
+            bar.style.width = pct + '%';
+            bar.textContent = pct + '%';
+
+            grid.render(data.images);
+        } catch (e) {
+            document.getElementById('gridContainer').innerHTML =
+                '<p style="padding:20px;color:#721c24;">Failed to load images.</p>';
+        }
+    }
+
+    loadGrid();
+</script>
+{% endblock %}

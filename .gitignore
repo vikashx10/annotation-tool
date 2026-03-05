@@ -13,6 +13,8 @@ ENV/
 
 # Local cache
 tmp_pages/
+instance/
+static/thumbnails/
 
 # IDE
 .vscode/
@@ -23,3 +25,5 @@ tmp_pages/
 # OS
 .DS_Store
 Thumbs.db
+IMAGES/
+To_Do.md

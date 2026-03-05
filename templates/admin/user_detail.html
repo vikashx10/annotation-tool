@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}User: {{ user.username }}{% endblock %}
+{% block header_title %}User: {{ user.username }} ({{ user.role }}){% endblock %}
+
+{% block content %}
+<div class="section">
+    <a href="{{ url_for('admin.dashboard') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px;">Back to Dashboard</a>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div class="card" style="text-align:center;">
+            <h3>Total</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Completed</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ completed }}</div>
+        </div>
+        <div class="card" style="text-align:center;">
+            <h3>Approved</h3>
+            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ approved }}</div>
+        </div>
+    </div>
+
+    {% if total > 0 %}
+    <div class="progress-bar-container">
+        <div class="progress-bar-fill" style="width: {{ (completed / total * 100) | round(1) }}%;">
+            {{ (completed / total * 100) | round(1) }}%
+        </div>
+    </div>
+    {% endif %}
+
+    {% if managed %}
+    <div class="card">
+        <h3>Managed Annotators</h3>
+        <table>
+            <thead>
+                <tr><th>Annotator</th><th>Assigned</th><th>Done</th></tr>
+            </thead>
+            <tbody>
+                {% for m in managed %}
+                <tr>
+                    <td>{{ m.user.username }}</td>
+                    <td>{{ m.total }}</td>
+                    <td>{{ m.done }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>Assignments</h3>
+        <table>
+            <thead>
+                <tr><th>Image</th><th>Status</th><th>Assigned</th></tr>
+            </thead>
+            <tbody>
+                {% for a in assignments[:100] %}
+                <tr>
+                    <td>{{ a.image.filename if a.image else 'Unknown' }}</td>
+                    <td><span class="badge badge-{{ a.status }}">{{ a.status }}</span></td>
+                    <td>{{ a.assigned_at.strftime('%Y-%m-%d %H:%M') if a.assigned_at else '' }}</td>
+                </tr>
+                {% endfor %}
+                {% if assignments | length > 100 %}
+                <tr><td colspan="3" style="color:#6c757d;">...and {{ assignments | length - 100 }} more</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
