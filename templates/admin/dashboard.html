@@ -3,50 +3,208 @@
 {% block header_title %}Admin Dashboard{% endblock %}
 
 {% block content %}
-<div class="section">
+<div class="container">
     <!-- Stats -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
-        <div class="card" style="text-align:center;">
-            <h3>Total Images</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total_images }}</div>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Distributed</div>
+            <div class="value">{{ total_distributed }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Assigned</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #17a2b8;">{{ total_assigned }}</div>
+        <div class="stat-card">
+            <div class="label">Assigned</div>
+            <div class="value muted">{{ total_assigned }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Under Review</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ total_under_review }}</div>
+        <div class="stat-card">
+            <div class="label">Under Review</div>
+            <div class="value amber">{{ total_under_review }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Completed</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ total_completed }}</div>
+        <div class="stat-card">
+            <div class="label">Completed</div>
+            <div class="value green">{{ total_completed }}</div>
         </div>
     </div>
 
-    {% if total_images > 0 %}
+    {% if total_distributed > 0 %}
     <div class="progress-bar-container">
-        <div class="progress-bar-fill" style="width: {{ (total_completed / total_images * 100) if total_images > 0 else 0 }}%;">
-            {{ ((total_completed / total_images * 100) | round(1)) if total_images > 0 else 0 }}%
+        <div class="progress-bar-fill" style="width: {{ (total_completed / total_distributed * 100) | round(1) }}%;">
+            {{ (total_completed / total_distributed * 100) | round(1) }}%
         </div>
     </div>
     {% endif %}
 
-    <!-- Image Root -->
+    <!-- S3 Bucket -->
     <div class="card">
-        <h3>Image Root Directory</h3>
-        <form method="POST" action="{{ url_for('admin.set_image_root') }}" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+        <h3>S3 Bucket</h3>
+        <form method="POST" action="{{ url_for('admin.set_s3_bucket') }}" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
             <div class="form-group" style="flex:1; margin-bottom:0;">
-                <input type="text" name="image_root" value="{{ image_root }}" placeholder="/path/to/images" required>
+                <input type="text" name="s3_bucket" value="{{ s3_bucket }}" placeholder="my-bucket" required>
             </div>
-            <button type="submit" class="btn-primary">Set & Scan</button>
+            <button type="submit" class="btn-primary">Save</button>
         </form>
-        {% if image_root %}
-        <form method="POST" action="{{ url_for('admin.rescan_images') }}" style="margin-top:8px;">
-            <button type="submit" class="btn-secondary btn-sm">Rescan Images</button>
-        </form>
+        {% if s3_bucket %}
+        <p style="margin-top:6px; font-size:0.85em; color:#666;">Current: <code>{{ s3_bucket }}</code></p>
         {% endif %}
     </div>
+
+    <!-- Assign S3 Prefix to OA -->
+    {% if s3_bucket %}
+    <div class="card">
+        <h3>Assign S3 Prefix to OA</h3>
+        <p style="font-size:0.85em; color:#666; margin-bottom:12px;">
+            Browse the bucket to pick a folder — all images inside (any depth) will be assigned to the OA.
+        </p>
+        <form method="POST" action="{{ url_for('admin.assign_oa_prefix') }}" id="assignForm">
+            <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:12px;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>OA</label>
+                    <select name="oa_id" required style="width:180px;">
+                        {% for oa in oas %}
+                        <option value="{{ oa.id }}">{{ oa.username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>&nbsp;</label>
+                    <button type="button" class="btn-secondary" onclick="openS3Browser()">+ Browse &amp; Add Prefix</button>
+                </div>
+                <button type="submit" class="btn-primary" style="align-self:flex-end;">Assign All</button>
+            </div>
+
+            <!-- Selected prefixes as tags -->
+            <div id="selectedPrefixes" style="display:flex; flex-wrap:wrap; gap:8px; min-height:36px; padding:8px; background:#f8f9fa; border-radius:6px; border:1px solid #dee2e6;">
+                <span style="color:#aaa; font-size:0.85em; align-self:center;" id="noneLabel">No prefixes selected — click Browse to add</span>
+            </div>
+            <!-- Hidden inputs submitted with form -->
+            <div id="prefixInputs"></div>
+        </form>
+    </div>
+
+    <!-- S3 Browser Modal -->
+    <div id="s3BrowserOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000;" onclick="closeS3Browser()"></div>
+    <div id="s3BrowserModal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+         width:560px; max-width:95vw; background:#fff; border-radius:10px; box-shadow:0 8px 40px rgba(0,0,0,0.25); z-index:1001; overflow:hidden;">
+        <div style="background:#111; color:#fff; padding:14px 20px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <strong>Browse S3 Bucket: {{ s3_bucket }}</strong>
+                <div id="s3CurrentPath" style="font-size:0.8em; opacity:0.85; margin-top:2px;"></div>
+            </div>
+            <button onclick="closeS3Browser()" style="background:none; border:none; color:#fff; font-size:1.4em; cursor:pointer;">&times;</button>
+        </div>
+        <div id="s3BrowserList" style="max-height:380px; overflow-y:auto; padding:8px 0;">
+            <div style="padding:20px; color:#6c757d;">Loading...</div>
+        </div>
+        <div style="padding:12px 16px; border-top:1px solid #e9ecef; display:flex; justify-content:space-between; align-items:center; background:#f8f9fa;">
+            <span style="font-size:0.85em; color:#6c757d;" id="s3AddHint">Click a folder name to drill in · Click Add to select it</span>
+            <button class="btn-secondary" onclick="closeS3Browser()">Done</button>
+        </div>
+    </div>
+
+    <script>
+    let s3CurrentPrefix = '';
+    const selectedPrefixes = new Set();
+
+    function openS3Browser() {
+        s3CurrentPrefix = '';
+        document.getElementById('s3BrowserOverlay').style.display = '';
+        document.getElementById('s3BrowserModal').style.display = '';
+        loadS3Folders('');
+    }
+
+    function closeS3Browser() {
+        document.getElementById('s3BrowserOverlay').style.display = 'none';
+        document.getElementById('s3BrowserModal').style.display = 'none';
+    }
+
+    async function loadS3Folders(prefix) {
+        s3CurrentPrefix = prefix;
+        document.getElementById('s3CurrentPath').textContent = 's3://{{ s3_bucket }}/' + prefix;
+        document.getElementById('s3BrowserList').innerHTML = '<div style="padding:20px;color:#6c757d;">Loading...</div>';
+
+        const resp = await fetch('/api/s3/browse?prefix=' + encodeURIComponent(prefix));
+        const data = await resp.json();
+        if (data.error) {
+            document.getElementById('s3BrowserList').innerHTML = `<div style="padding:20px;color:#dc3545;">${data.error}</div>`;
+            return;
+        }
+
+        let html = '';
+
+        if (data.parent !== null && data.parent !== undefined) {
+            html += `<div onclick="loadS3Folders('${esc(data.parent)}')"
+                style="padding:10px 20px; cursor:pointer; display:flex; align-items:center; gap:10px; border-bottom:1px solid #f0f0f0; color:#111;">
+                &#8593; &nbsp;.. (go up)
+            </div>`;
+        }
+
+        if (prefix) {
+            const added = selectedPrefixes.has(prefix);
+            html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px;
+                       background:${added ? '#d4edda' : '#fffbe6'}; border-bottom:1px solid #f0f0f0; font-weight:600;">
+                <span style="flex:1;">&#9989; Use current folder <span style="font-weight:400;font-size:0.8em;color:#6c757d;">(all images recursively)</span></span>
+                ${added
+                    ? `<span style="color:#28a745;font-size:0.85em;">✓ Added</span>`
+                    : `<button onclick="addPrefix('${esc(prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
+            </div>`;
+        }
+
+        data.folders.forEach(f => {
+            const added = selectedPrefixes.has(f.prefix);
+            html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid #f0f0f0; background:${added ? '#d4edda' : 'white'};">
+                <span onclick="loadS3Folders('${esc(f.prefix)}')" style="flex:1; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                    <span style="color:#111;">&#128193;</span> ${f.name}/
+                </span>
+                ${added
+                    ? `<span style="color:#28a745;font-size:0.85em;">✓ Added</span>`
+                    : `<button onclick="addPrefix('${esc(f.prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
+            </div>`;
+        });
+
+        if (!data.folders.length && !prefix) {
+            html += '<div style="padding:20px;color:#6c757d;">No sub-folders found.</div>';
+        }
+
+        document.getElementById('s3BrowserList').innerHTML = html;
+    }
+
+    function addPrefix(prefix) {
+        selectedPrefixes.add(prefix);
+        renderTags();
+        loadS3Folders(s3CurrentPrefix); // refresh to show green highlight
+    }
+
+    function removePrefix(prefix) {
+        selectedPrefixes.delete(prefix);
+        renderTags();
+    }
+
+    function renderTags() {
+        const container = document.getElementById('selectedPrefixes');
+        const inputs = document.getElementById('prefixInputs');
+        const noneLabel = document.getElementById('noneLabel');
+
+        if (selectedPrefixes.size === 0) {
+            container.innerHTML = '<span style="color:#aaa;font-size:0.85em;align-self:center;" id="noneLabel">No prefixes selected — click Browse to add</span>';
+            inputs.innerHTML = '';
+            return;
+        }
+
+        noneLabel && (noneLabel.style.display = 'none');
+        container.innerHTML = [...selectedPrefixes].map(p => `
+            <span style="display:inline-flex;align-items:center;gap:6px;background:#eef0ff;border:1px solid #c5caf5;border-radius:20px;padding:4px 12px;font-size:0.85em;">
+                <span style="color:#111;">&#128193;</span>
+                <code style="font-size:0.9em;">${p}</code>
+                <span onclick="removePrefix('${esc(p)}')" style="cursor:pointer;color:#dc3545;font-weight:700;margin-left:2px;">&#x2715;</span>
+            </span>
+        `).join('');
+
+        inputs.innerHTML = [...selectedPrefixes].map(p =>
+            `<input type="hidden" name="prefix" value="${p}">`
+        ).join('');
+    }
+
+    function esc(s) { return s.replace(/'/g, "\\'"); }
+    </script>
+    {% endif %}
 
     <!-- Export -->
     {% if total_completed > 0 %}
@@ -88,8 +246,13 @@
             <thead>
                 <tr>
                     <th>OA</th>
-                    <th>Assigned Images</th>
-                    <th>Completed</th>
+                    <th>S3 Prefix</th>
+                    <th>Cursor / Last Image</th>
+                    <th>Distributed</th>
+                    <th>Pending</th>
+                    <th>Annotated</th>
+                    <th>Approved</th>
+                    <th>Rejected</th>
                     <th>Annotators</th>
                     <th>Actions</th>
                 </tr>
@@ -98,8 +261,32 @@
                 {% for stat in oa_stats %}
                 <tr>
                     <td>{{ stat.user.username }}</td>
-                    <td>{{ stat.assigned }}</td>
-                    <td>{{ stat.completed }}</td>
+                    <td style="font-size:0.82em;">
+                        {% if stat.cursor %}
+                            {% for c in stat.cursor %}
+                            <div style="margin-bottom:3px;">
+                                <code>{{ c.prefix or '(root)' }}</code>
+                                {% if c.exhausted %}<span style="color:#dc3545;"> ✓done</span>
+                                {% elif c.last_key %}<span style="color:#28a745;"> ▶active</span>
+                                {% else %}<span style="color:#6c757d;"> ○new</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                        <span style="color:#aaa;">not assigned</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-size:0.8em; color:#6c757d;">
+                        {% if stat.cursor %}
+                            {% for c in stat.cursor %}{% if c.last_key %}
+                                <code style="font-size:0.9em;">{{ c.last_key.split('/')[-1] }}</code><br>
+                            {% endif %}{% endfor %}
+                        {% else %}&mdash;{% endif %}
+                    </td>
+                    <td>{{ stat.distributed }}</td>
+                    <td>{{ stat.pending }}</td>
+                    <td>{{ stat.annotated }}</td>
+                    <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
+                    <td style="color:#dc3545;">{{ stat.rejected }}</td>
                     <td>{{ stat.managed }}</td>
                     <td><a href="{{ url_for('admin.user_detail', user_id=stat.user.id) }}" class="btn btn-info btn-sm">Details</a></td>
                 </tr>

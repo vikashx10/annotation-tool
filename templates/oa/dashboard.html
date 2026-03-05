@@ -3,35 +3,53 @@
 {% block header_title %}OA Dashboard{% endblock %}
 
 {% block content %}
-<div class="section">
+<div class="container">
+    <!-- S3 Cursor info -->
+    {% if cursors %}
+    <div class="card" style="background:#f8f9fa; padding:12px 16px; margin-bottom:16px;">
+        <strong>S3 Prefixes assigned:</strong> {{ cursors|length }} &nbsp;|&nbsp; <strong>Distributed so far:</strong> {{ total_distributed }}
+        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
+        {% for c in cursors %}
+            <span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #dee2e6;border-radius:16px;padding:4px 12px;font-size:0.83em;">
+                <span style="color:#111;">&#128193;</span>
+                <code>{{ c.prefix or '(root)' }}</code>
+                {% if c.exhausted %}<span style="color:#dc3545;">✓ done</span>
+                {% elif c.last_key %}<span style="color:#28a745;">▶ active</span>
+                {% else %}<span style="color:#6c757d;">○ not started</span>{% endif %}
+            </span>
+        {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Stats -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px;">
-        <div class="card" style="text-align:center;">
-            <h3>Assigned</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total_assigned }}</div>
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Distributed</div>
+            <div class="value">{{ total_distributed }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Pending</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #6c757d;">{{ total_pending }}</div>
+        <div class="stat-card">
+            <div class="label">Pending</div>
+            <div class="value muted">{{ total_pending }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>To Review</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ total_annotated }}</div>
+        <div class="stat-card">
+            <div class="label">To Review</div>
+            <div class="value amber">{{ total_annotated }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Approved</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ total_approved }}</div>
+        <div class="stat-card">
+            <div class="label">Approved</div>
+            <div class="value green">{{ total_approved }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Rejected</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #dc3545;">{{ total_rejected }}</div>
+        <div class="stat-card">
+            <div class="label">Rejected</div>
+            <div class="value red">{{ total_rejected }}</div>
         </div>
     </div>
 
-    {% if total_assigned > 0 %}
+    {% if total_distributed > 0 %}
     <div class="progress-bar-container">
-        <div class="progress-bar-fill" style="width: {{ (total_approved / total_assigned * 100) | round(1) }}%;">
-            {{ (total_approved / total_assigned * 100) | round(1) }}% approved
+        <div class="progress-bar-fill" style="width: {{ (total_approved / total_distributed * 100) | round(1) }}%;">
+            {{ (total_approved / total_distributed * 100) | round(1) }}% approved
         </div>
     </div>
     {% endif %}
@@ -45,15 +63,50 @@
             {% endif %}
             <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary">View All Images</a>
         </div>
-        {% if unassigned_to_annotator > 0 and annotator_stats %}
+        {% if annotator_stats and cursors and cursors|selectattr('exhausted','equalto',false)|list %}
         <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef;">
-            <h3 style="margin-bottom:12px;">Distribute {{ unassigned_to_annotator }} Unassigned Images</h3>
-            <form method="POST" action="{{ url_for('oa.distribute') }}">
+            <h3 style="margin-bottom:4px;">Distribute Images from S3</h3>
+            <p style="font-size:0.85em; color:#666; margin-bottom:14px;">
+                Images are fetched from S3 in sequence. Each distribute call picks up where the last one stopped.
+            </p>
+
+            <!-- Tab toggle -->
+            <div style="display:flex; gap:0; margin-bottom:16px;">
+                <button type="button" onclick="showMode('equal')" id="tab-equal"
+                    style="padding:6px 18px; border:1px solid #111; background:#111; color:#fff; border-radius:4px 0 0 4px; cursor:pointer;">
+                    Equal (all annotators)
+                </button>
+                <button type="button" onclick="showMode('custom')" id="tab-custom"
+                    style="padding:6px 18px; border:1px solid #111; background:#fff; color:#111; border-radius:0 4px 4px 0; cursor:pointer;">
+                    Custom (per annotator)
+                </button>
+            </div>
+
+            <!-- Equal mode -->
+            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-equal">
+                <input type="hidden" name="mode" value="equal">
+                <div style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Images per annotator</label>
+                        <input type="number" name="per_annotator" min="1" value="500"
+                               style="width:140px; text-align:center; font-size:1.1em;">
+                    </div>
+                    <div style="color:#6c757d; font-size:0.9em; padding-bottom:8px;">
+                        × {{ annotator_stats|length }} annotators
+                        = <strong>{{ annotator_stats|length }} × N</strong> images fetched from S3
+                    </div>
+                    <button type="submit" class="btn-warning">Distribute to All</button>
+                </div>
+            </form>
+
+            <!-- Custom mode -->
+            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-custom" style="display:none;">
+                <input type="hidden" name="mode" value="custom">
                 <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:end;">
                     {% for stat in annotator_stats %}
                     <div class="form-group" style="margin-bottom:0;">
                         <label>{{ stat.user.username }}</label>
-                        <input type="number" name="count_{{ stat.user.id }}" min="0" max="{{ unassigned_to_annotator }}" value="0"
+                        <input type="number" name="count_{{ stat.user.id }}" min="0" value="0"
                                style="width:100px; text-align:center;">
                     </div>
                     {% endfor %}
@@ -61,7 +114,22 @@
                 </div>
             </form>
         </div>
+        {% elif cursors and not cursors|selectattr('exhausted','equalto',false)|list %}
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef; color:#dc3545;">
+            All images in your S3 prefix have been distributed.
+        </div>
         {% endif %}
+
+        <script>
+        function showMode(mode) {
+            document.getElementById('form-equal').style.display = mode === 'equal' ? '' : 'none';
+            document.getElementById('form-custom').style.display = mode === 'custom' ? '' : 'none';
+            document.getElementById('tab-equal').style.background = mode === 'equal' ? '#111' : '#fff';
+            document.getElementById('tab-equal').style.color = mode === 'equal' ? '#fff' : '#111';
+            document.getElementById('tab-custom').style.background = mode === 'custom' ? '#111' : '#fff';
+            document.getElementById('tab-custom').style.color = mode === 'custom' ? '#fff' : '#111';
+        }
+        </script>
     </div>
 
     <!-- Add annotator -->

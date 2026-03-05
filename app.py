@@ -24,7 +24,6 @@ def create_app():
 
     # Ensure instance dir exists
     (BASE_DIR / "instance").mkdir(exist_ok=True)
-    (BASE_DIR / "static" / "thumbnails").mkdir(parents=True, exist_ok=True)
 
     # Init extensions
     init_db(app)

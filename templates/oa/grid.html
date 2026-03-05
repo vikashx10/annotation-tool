@@ -1,31 +1,31 @@
 {% extends "base.html" %}
-{% block title %}OA Image Grid{% endblock %}
-{% block header_title %}All Images{% endblock %}
+{% block title %}Review Grid{% endblock %}
+{% block header_title %}Review Grid{% endblock %}
 
 {% block content %}
-<div class="controls">
-    <div class="image-info" id="statsInfo">Loading...</div>
-    <div class="nav-buttons">
-        <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Review Next</a>
-        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">Dashboard</a>
+<div class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
+        <div id="statsInfo" style="font-size:0.84rem; font-weight:500; color:#555;">Loading...</div>
+        <div style="display:flex; gap:8px;">
+            <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Review Next</a>
+            <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">Dashboard</a>
+        </div>
     </div>
-</div>
 
-<div class="progress-bar-container" style="margin: 0 30px;">
-    <div class="progress-bar-fill" id="progressBar" style="width: 0%;">0%</div>
-</div>
+    <div class="progress-bar-container" style="margin-bottom:20px;">
+        <div class="progress-bar-fill" id="progressBar" style="width:0%;"></div>
+    </div>
 
-<div class="image-grid" id="gridContainer">
-    <p style="color:#6c757d;">Loading...</p>
+    <div class="image-grid" id="gridContainer">
+        <p style="color:#bbb; padding:20px;">Loading...</p>
+    </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/grid.js') }}"></script>
 <script>
     const grid = new ImageGrid('gridContainer', {
         fetchUrl: '{{ url_for("oa.grid_data") }}',
-        onClick: (imageId) => {
-            window.location = `/oa/review/${imageId}`;
-        }
+        onClick: (imageId) => { window.location = `/oa/review/${imageId}`; }
     });
 
     async function loadGrid() {
@@ -34,17 +34,16 @@
             const data = await resp.json();
 
             document.getElementById('statsInfo').textContent =
-                `Total: ${data.total} | To Review: ${data.to_review} | Approved: ${data.approved}`;
+                `Total: ${data.total} · To Review: ${data.to_review} · Approved: ${data.approved}`;
 
             const pct = data.total > 0 ? ((data.approved / data.total) * 100).toFixed(1) : 0;
             const bar = document.getElementById('progressBar');
             bar.style.width = pct + '%';
-            bar.textContent = pct + '%';
 
-            grid.render(data.images);
+            grid.render(data.images, data);
         } catch (e) {
             document.getElementById('gridContainer').innerHTML =
-                '<p style="padding:20px;color:#721c24;">Failed to load images.</p>';
+                '<p style="padding:20px; color:#dc2626;">Failed to load images.</p>';
         }
     }
 

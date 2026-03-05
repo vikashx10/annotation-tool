@@ -3,21 +3,22 @@
 {% block header_title %}User: {{ user.username }} ({{ user.role }}){% endblock %}
 
 {% block content %}
-<div class="section">
-    <a href="{{ url_for('admin.dashboard') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px;">Back to Dashboard</a>
+<div class="container">
+    <a href="{{ url_for('admin.dashboard') }}" class="btn btn-secondary btn-sm" style="margin-bottom:16px;">← Back</a>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px;">
-        <div class="card" style="text-align:center;">
-            <h3>Total</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #667eea;">{{ total }}</div>
+    <!-- Stats -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Total</div>
+            <div class="value">{{ total }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Completed</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #ffc107;">{{ completed }}</div>
+        <div class="stat-card">
+            <div class="label">Completed</div>
+            <div class="value amber">{{ completed }}</div>
         </div>
-        <div class="card" style="text-align:center;">
-            <h3>Approved</h3>
-            <div style="font-size: 2em; font-weight: 700; color: #28a745;">{{ approved }}</div>
+        <div class="stat-card">
+            <div class="label">Approved</div>
+            <div class="value green">{{ approved }}</div>
         </div>
     </div>
 
@@ -29,12 +30,41 @@
     </div>
     {% endif %}
 
+    {% if user.role == "oa" and cursor %}
+    <div class="card" style="background:#f8f9fa;">
+        <h3>S3 Prefixes ({{ cursor|length }})</h3>
+        <table style="width:100%;">
+            <thead><tr><th>Prefix</th><th>Status</th><th>Last Distributed</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for c in cursor %}
+            <tr>
+                <td><code style="font-size:0.85em;">{{ c.bucket }}/{{ c.prefix or '(root)' }}</code></td>
+                <td>
+                    {% if c.exhausted %}<span style="color:#dc3545;">✓ Exhausted</span>
+                    {% elif c.last_key %}<span style="color:#28a745;">▶ Active</span>
+                    {% else %}<span style="color:#6c757d;">○ Not started</span>{% endif %}
+                </td>
+                <td style="font-size:0.8em; color:#6c757d;">{{ c.last_key or '—' }}</td>
+                <td>
+                    <form method="POST" action="{{ url_for('admin.remove_oa_prefix', cursor_id=c.id) }}" style="display:inline;"
+                          onsubmit="return confirm('Remove prefix {{ c.prefix }}?');">
+                        <button type="submit" class="btn-danger btn-sm">Remove</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
     {% if managed %}
+    <!-- Managed Annotators (OA view) -->
     <div class="card">
         <h3>Managed Annotators</h3>
         <table>
             <thead>
-                <tr><th>Annotator</th><th>Assigned</th><th>Done</th></tr>
+                <tr><th>Annotator</th><th>Assigned</th><th>Done</th><th>Progress</th></tr>
             </thead>
             <tbody>
                 {% for m in managed %}
@@ -42,6 +72,15 @@
                     <td>{{ m.user.username }}</td>
                     <td>{{ m.total }}</td>
                     <td>{{ m.done }}</td>
+                    <td>
+                        {% if m.total > 0 %}
+                        <div class="progress-bar-container" style="height:16px; width:120px; display:inline-block;">
+                            <div class="progress-bar-fill" style="width: {{ (m.done / m.total * 100) | round(1) }}%; font-size:10px;">
+                                {{ (m.done / m.total * 100) | round(0) }}%
+                            </div>
+                        </div>
+                        {% else %}-{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -49,25 +88,44 @@
     </div>
     {% endif %}
 
+    <!-- Work Items -->
     <div class="card">
-        <h3>Assignments</h3>
+        <h3>Work Items (showing first 100)</h3>
+        {% if assignments %}
         <table>
             <thead>
-                <tr><th>Image</th><th>Status</th><th>Assigned</th></tr>
+                <tr>
+                    <th>Filename</th>
+                    <th>S3 Key</th>
+                    <th>Status</th>
+                    {% if user.role == "oa" %}<th>Annotator</th>{% endif %}
+                    <th>Created</th>
+                    <th>Annotated</th>
+                </tr>
             </thead>
             <tbody>
-                {% for a in assignments[:100] %}
+                {% for w in assignments[:100] %}
                 <tr>
-                    <td>{{ a.image.filename if a.image else 'Unknown' }}</td>
-                    <td><span class="badge badge-{{ a.status }}">{{ a.status }}</span></td>
-                    <td>{{ a.assigned_at.strftime('%Y-%m-%d %H:%M') if a.assigned_at else '' }}</td>
+                    <td>{{ w.filename }}</td>
+                    <td style="font-size:0.75em; color:#6c757d; max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        {{ w.s3_key }}
+                    </td>
+                    <td><span class="badge badge-{{ w.status }}">{{ w.status }}</span></td>
+                    {% if user.role == "oa" %}
+                    <td>{{ w.annotator.username if w.annotator else '—' }}</td>
+                    {% endif %}
+                    <td style="font-size:0.85em;">{{ w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else '' }}</td>
+                    <td style="font-size:0.85em;">{{ w.annotated_at.strftime('%Y-%m-%d %H:%M') if w.annotated_at else '—' }}</td>
                 </tr>
                 {% endfor %}
-                {% if assignments | length > 100 %}
-                <tr><td colspan="3" style="color:#6c757d;">...and {{ assignments | length - 100 }} more</td></tr>
-                {% endif %}
             </tbody>
         </table>
+        {% if assignments | length > 100 %}
+        <p style="color:#6c757d; margin-top:8px;">...and {{ assignments | length - 100 }} more work items</p>
+        {% endif %}
+        {% else %}
+        <p style="color:#6c757d;">No work items yet.</p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -1,36 +1,55 @@
 {% extends "base.html" %}
 {% block title %}Annotate{% endblock %}
-{% block header_title %}Annotate Image{% endblock %}
+{% block header_title %}Annotate{% endblock %}
 
 {% block content %}
-<div class="controls">
-    <div class="nav-buttons">
-        <button class="btn-info" id="drawModeBtn" onclick="toggleDraw()">Draw Mode: OFF</button>
-        <button class="btn-success" onclick="saveAndNext()" id="saveNextBtn">Save & Next</button>
-        <button class="btn-primary" onclick="saveOnly()">Save</button>
+<div class="annotate-layout">
+
+    <!-- Canvas area -->
+    <div class="annotate-canvas-area">
+        <div class="annotate-toolbar">
+            <button id="drawModeBtn" onclick="toggleDraw()">
+                Draw <span class="shortcut">D</span>
+            </button>
+            <span class="divider"></span>
+            <button class="btn-primary" onclick="saveAndNext()" id="saveNextBtn">
+                Save &amp; Next <span class="shortcut">S</span>
+            </button>
+            <button onclick="saveOnly()">Save</button>
+            <span class="divider"></span>
+            <span id="progressInfo" style="font-size:0.78rem; color:#888;"></span>
+            <div style="flex:1;"></div>
+            <a href="{{ url_for('annotator.grid') }}" class="btn btn-secondary btn-sm">Grid View</a>
+        </div>
+        <div class="canvas-scroll">
+            <div class="canvas-wrapper">
+                <canvas id="annotationCanvas"></canvas>
+            </div>
+        </div>
     </div>
-    <div class="image-info">
-        <div id="imageInfo">Loading...</div>
-        <div id="progressInfo" style="font-size:13px; color:#6c757d;"></div>
-    </div>
-    <div class="nav-buttons">
-        <a href="{{ url_for('annotator.grid') }}" class="btn btn-secondary">Grid View</a>
+
+    <!-- Sidebar -->
+    <div class="annotate-sidebar">
+        <div class="sidebar-section">
+            <h4>Image</h4>
+            <div class="sidebar-meta" id="imageInfo">Loading...</div>
+        </div>
+        <div class="sidebar-section" style="display:flex; align-items:center; justify-content:space-between;">
+            <h4 style="margin:0;">Annotations</h4>
+            <span id="annCount" style="font-size:0.78rem; color:#999; font-weight:500;"></span>
+        </div>
+        <div class="ann-list" id="annList"></div>
     </div>
 </div>
 
-<div class="canvas-container">
-    <div class="canvas-wrapper">
-        <canvas id="annotationCanvas"></canvas>
-    </div>
-</div>
-
+<!-- Class selector modal -->
 <div class="overlay" id="overlay"></div>
 <div class="class-selector" id="classSelector">
-    <h3>Select layout class:</h3>
+    <h3>Select class</h3>
     <div class="class-selector-buttons" id="classButtons"></div>
-    <div style="margin-top: 15px;">
-        <button class="btn-danger" onclick="doClearRegion()" style="background: #fd7e14;">Clear Region</button>
-        <button class="btn-secondary" onclick="ac.cancelDrawing()" style="margin-left: 10px;">Cancel</button>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn-danger btn-sm" onclick="doClearRegion()">Clear Region</button>
+        <button class="btn-secondary btn-sm" onclick="ac.cancelDrawing()">Cancel</button>
     </div>
 </div>
 
@@ -57,16 +76,19 @@
             });
             if (!resp.ok) throw new Error('Save failed');
         },
-        onAnnotationsChanged: (anns) => {
+        onAnnotationsChanged: () => {
             updateInfo();
+            renderAnnList();
         }
     });
 
     function toggleDraw() {
         const on = ac.toggleDrawMode();
         const btn = document.getElementById('drawModeBtn');
-        btn.textContent = `Draw Mode: ${on ? 'ON' : 'OFF'}`;
-        btn.className = on ? 'btn-success' : 'btn-info';
+        btn.innerHTML = on
+            ? `Stop Drawing <span class="shortcut">D</span>`
+            : `Draw <span class="shortcut">D</span>`;
+        btn.classList.toggle('draw-active', on);
     }
 
     function doClearRegion() {
@@ -75,15 +97,34 @@
         else showToast('No annotations in region', 'error');
     }
 
+    function renderAnnList() {
+        const anns = ac.getAnnotations();
+        const list = document.getElementById('annList');
+        const countEl = document.getElementById('annCount');
+        countEl.textContent = anns.length ? `(${anns.length})` : '';
+        if (!anns.length) {
+            list.innerHTML = '<div style="padding:16px;color:#bbb;font-size:0.82rem;text-align:center;">No annotations yet</div>';
+            return;
+        }
+        list.innerHTML = anns.map((a, i) => `
+            <div class="ann-item">
+                <span class="ann-color" style="background:${CLASS_COLORS[a.class_id % CLASS_COLORS.length]};"></span>
+                <span class="ann-label">${CLASS_NAMES[a.class_id] || 'Class ' + a.class_id}</span>
+                <button class="ann-remove" onclick="ac.removeAnnotation(${i})" title="Remove">&times;</button>
+            </div>
+        `).join('');
+    }
+
     function updateInfo() {
         const count = ac.getAnnotationCount();
-        document.getElementById('imageInfo').textContent =
-            currentImageId ? `Image #${currentImageId} | Boxes: ${count}` : 'No image loaded';
+        document.getElementById('imageInfo').innerHTML = currentImageId
+            ? `<strong>ID:</strong> ${currentImageId}<br><strong>Boxes:</strong> ${count}`
+            : 'No image loaded';
     }
 
     async function loadImage(imageId) {
         if (!imageId) {
-            document.getElementById('imageInfo').textContent = 'No more images to annotate!';
+            document.getElementById('imageInfo').textContent = 'No more images!';
             document.getElementById('saveNextBtn').disabled = true;
             return;
         }
@@ -91,7 +132,7 @@
         try {
             await ac.loadImage(imageId);
             updateInfo();
-            // Update URL without reload
+            renderAnnList();
             history.replaceState(null, '', `/annotator/annotate/${imageId}`);
         } catch (e) {
             showToast('Failed to load image', 'error');
@@ -122,7 +163,7 @@
                 await loadImage(data.next_image_id);
             } else {
                 showToast(data.message || 'All done!', 'success');
-                document.getElementById('imageInfo').textContent = 'All images annotated!';
+                document.getElementById('imageInfo').innerHTML = '<strong>All images annotated!</strong>';
                 document.getElementById('saveNextBtn').disabled = true;
             }
             loadProgress();
@@ -137,11 +178,10 @@
             const data = await resp.json();
             const pct = data.total > 0 ? ((data.done / data.total) * 100).toFixed(1) : 0;
             document.getElementById('progressInfo').textContent =
-                `Progress: ${data.done}/${data.total} (${pct}%)`;
+                `${data.done} / ${data.total} (${pct}%)`;
         } catch (e) {}
     }
 
-    // Keyboard shortcuts
     document.addEventListener('keydown', async function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.key === 'd' || e.key === 'D') {
@@ -152,7 +192,6 @@
         }
     });
 
-    // Init
     loadImage(currentImageId);
     loadProgress();
 </script>

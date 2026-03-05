@@ -1,30 +1,44 @@
 {% extends "base.html" %}
 {% block title %}Review{% endblock %}
-{% block header_title %}Review Annotations{% endblock %}
+{% block header_title %}Review{% endblock %}
 
 {% block content %}
-<div class="controls">
-    <div class="image-info">
-        <div id="imageInfo">Loading...</div>
+<div class="review-layout">
+
+    <!-- Left sidebar -->
+    <div class="review-sidebar">
+        <div class="review-meta" id="reviewMeta">Loading...</div>
+
+        <button class="review-approve btn" id="approveBtn" onclick="doReview('approve')">
+            Approve <span class="kbd">A</span>
+        </button>
+        <button class="review-reject btn" id="rejectBtn" onclick="doReview('reject')">
+            Reject <span class="kbd">R</span>
+        </button>
+
+        <!-- Annotation list -->
+        <div style="border-top:1px solid var(--border); padding-top:10px; flex:1; overflow-y:auto; min-height:0;">
+            <div style="font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:8px;">
+                Annotations <span id="annCount" style="font-weight:400;"></span>
+            </div>
+            <div id="annList" style="font-size:0.82rem;"></div>
+        </div>
+
+        <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary btn-sm">Grid</a>
+        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary btn-sm">Dashboard</a>
     </div>
-    <div class="nav-buttons">
-        <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary">Grid View</a>
-        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">Dashboard</a>
+
+    <!-- Canvas area -->
+    <div class="annotate-canvas-area">
+        <div class="canvas-scroll">
+            <div class="canvas-wrapper">
+                <canvas id="annotationCanvas"></canvas>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="canvas-container">
-    <div class="canvas-wrapper">
-        <canvas id="annotationCanvas"></canvas>
-    </div>
-</div>
-
-<div class="review-actions">
-    <button class="btn-success" onclick="doReview('approve')" id="approveBtn" style="padding: 14px 40px; font-size: 18px;">Approve</button>
-    <button class="btn-danger" onclick="doReview('reject')" id="rejectBtn" style="padding: 14px 40px; font-size: 18px;">Reject</button>
-</div>
-
-<!-- Overlay and class selector for read-only display (not used but kept for canvas.js compatibility) -->
+<!-- Required for canvas.js compatibility -->
 <div class="overlay" id="overlay" style="display:none;"></div>
 <div class="class-selector" id="classSelector" style="display:none;">
     <div class="class-selector-buttons" id="classButtons"></div>
@@ -45,11 +59,30 @@
         classNames: CLASS_NAMES,
         classColors: CLASS_COLORS,
         readOnly: true,
+        onAnnotationsChanged: () => renderAnnList(),
     });
+
+    function renderAnnList() {
+        const anns = ac.getAnnotations();
+        document.getElementById('annCount').textContent = anns.length ? `(${anns.length})` : '';
+        const list = document.getElementById('annList');
+        if (!anns.length) {
+            list.innerHTML = '<div style="color:#bbb; font-size:0.8rem;">No annotations</div>';
+            return;
+        }
+        list.innerHTML = anns.map((a, i) => {
+            const color = CLASS_COLORS[a.class_id % CLASS_COLORS.length];
+            const name = CLASS_NAMES[a.class_id] || `Class ${a.class_id}`;
+            return `<div class="ann-item">
+                <span class="ann-color" style="background:${color};"></span>
+                <span class="ann-label">${i + 1}. ${name}</span>
+            </div>`;
+        }).join('');
+    }
 
     async function loadImage(imageId) {
         if (!imageId) {
-            document.getElementById('imageInfo').textContent = 'No images to review!';
+            document.getElementById('reviewMeta').innerHTML = '<strong>No images to review!</strong>';
             document.getElementById('approveBtn').disabled = true;
             document.getElementById('rejectBtn').disabled = true;
             return;
@@ -58,8 +91,9 @@
         try {
             await ac.loadImage(imageId);
             const count = ac.getAnnotationCount();
-            document.getElementById('imageInfo').textContent =
-                `Image #${imageId} | Annotations: ${count}`;
+            document.getElementById('reviewMeta').innerHTML =
+                `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${count}`;
+            renderAnnList();
             history.replaceState(null, '', `/oa/review/${imageId}`);
         } catch (e) {
             showToast('Failed to load image', 'error');
@@ -68,6 +102,8 @@
 
     async function doReview(action) {
         if (!currentImageId) return;
+        document.getElementById('approveBtn').disabled = true;
+        document.getElementById('rejectBtn').disabled = true;
         try {
             const resp = await fetch(`/api/review/${currentImageId}`, {
                 method: 'POST',
@@ -76,29 +112,28 @@
             });
             const data = await resp.json();
             if (data.status === 'ok') {
-                showToast(`${action === 'approve' ? 'Approved' : 'Rejected'}! Loading next...`, 'success');
+                showToast(action === 'approve' ? 'Approved!' : 'Rejected!', 'success');
                 await loadImage(data.next_image_id);
             } else if (data.status === 'done') {
                 showToast('All images reviewed!', 'success');
-                document.getElementById('imageInfo').textContent = 'All images reviewed!';
-                document.getElementById('approveBtn').disabled = true;
-                document.getElementById('rejectBtn').disabled = true;
+                document.getElementById('reviewMeta').innerHTML = '<strong>All reviewed!</strong>';
             } else {
                 showToast(data.message || 'Error', 'error');
             }
         } catch (e) {
             showToast('Error: ' + e.message, 'error');
+        } finally {
+            if (currentImageId) {
+                document.getElementById('approveBtn').disabled = false;
+                document.getElementById('rejectBtn').disabled = false;
+            }
         }
     }
 
-    // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        if (e.key === 'a' || e.key === 'A') {
-            doReview('approve');
-        } else if (e.key === 'r' || e.key === 'R') {
-            doReview('reject');
-        }
+        if (e.key === 'a' || e.key === 'A') doReview('approve');
+        else if (e.key === 'r' || e.key === 'R') doReview('reject');
     });
 
     loadImage(currentImageId);

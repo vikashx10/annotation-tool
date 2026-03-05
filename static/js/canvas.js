@@ -88,6 +88,7 @@ class AnnotationCanvas {
             this.image.onload = () => {
                 this.canvas.width = this.image.width;
                 this.canvas.height = this.image.height;
+                this._fitToContainer();
                 this.draw();
                 resolve();
             };
@@ -142,6 +143,19 @@ class AnnotationCanvas {
             ctx.strokeRect(x, y, w, h);
             ctx.setLineDash([]);
         }
+    }
+
+    _fitToContainer() {
+        const scroll = this.canvas.closest('.canvas-scroll');
+        if (!scroll) return;
+        const availW = scroll.clientWidth - 48;   // 24px padding each side
+        const availH = scroll.clientHeight - 48;
+        const imgW = this.canvas.width;
+        const imgH = this.canvas.height;
+        if (!availW || !availH || !imgW || !imgH) return;
+        const scale = Math.min(availW / imgW, availH / imgH);
+        this.canvas.style.width  = Math.round(imgW * scale) + 'px';
+        this.canvas.style.height = Math.round(imgH * scale) + 'px';
     }
 
     toggleDrawMode() {
@@ -357,6 +371,14 @@ class AnnotationCanvas {
 
     getAnnotationCount() {
         return this.annotations.length;
+    }
+
+    removeAnnotation(index) {
+        if (index >= 0 && index < this.annotations.length) {
+            this.annotations.splice(index, 1);
+            this.draw();
+            this._notifyChanged();
+        }
     }
 
     _notifyChanged() {

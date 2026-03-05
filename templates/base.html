@@ -4,33 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Annotation Tool{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>{% block header_title %}Annotation Tool{% endblock %}</h1>
-            <div class="nav-links">
-                {% if current_user.is_authenticated %}
-                    {% if current_user.role == 'admin' %}
-                        <a href="{{ url_for('admin.dashboard') }}" class="{% if request.blueprint == 'admin' %}active{% endif %}">Admin</a>
-                    {% elif current_user.role == 'oa' %}
-                        <a href="{{ url_for('oa.dashboard') }}" class="{% if request.endpoint == 'oa.dashboard' %}active{% endif %}">Dashboard</a>
-                        <a href="{{ url_for('oa.grid') }}" class="{% if request.endpoint == 'oa.grid' %}active{% endif %}">Review Grid</a>
-                    {% elif current_user.role == 'annotator' %}
-                        <a href="{{ url_for('annotator.grid') }}" class="{% if request.endpoint == 'annotator.grid' %}active{% endif %}">Grid</a>
-                        <a href="{{ url_for('annotator.annotate') }}" class="{% if request.endpoint == 'annotator.annotate' %}active{% endif %}">Annotate</a>
-                    {% endif %}
-                    <span class="user-info">{{ current_user.username }} ({{ current_user.role }})</span>
-                    <a href="{{ url_for('auth.logout') }}">Logout</a>
+    <div class="header">
+        <h1>{% block header_title %}Annotation Tool{% endblock %}</h1>
+        <div class="nav-links">
+            {% if current_user.is_authenticated %}
+                {% if current_user.role == 'admin' %}
+                    <a href="{{ url_for('admin.dashboard') }}" class="{% if request.blueprint == 'admin' %}active{% endif %}">Admin</a>
+                {% elif current_user.role == 'oa' %}
+                    <a href="{{ url_for('oa.dashboard') }}" class="{% if request.endpoint == 'oa.dashboard' %}active{% endif %}">Dashboard</a>
+                    <a href="{{ url_for('oa.grid') }}" class="{% if request.endpoint == 'oa.grid' %}active{% endif %}">Review Grid</a>
+                {% elif current_user.role == 'annotator' %}
+                    <a href="{{ url_for('annotator.grid') }}" class="{% if request.endpoint == 'annotator.grid' %}active{% endif %}">Grid</a>
+                    <a href="{{ url_for('annotator.annotate') }}" class="{% if request.endpoint == 'annotator.annotate' %}active{% endif %}">Annotate</a>
                 {% endif %}
-            </div>
+                <span class="user-info">{{ current_user.username }} ({{ current_user.role }})</span>
+                <a href="{{ url_for('auth.logout') }}">Logout</a>
+            {% endif %}
         </div>
+    </div>
 
+    <div class="page-shell">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div class="flash-messages" style="padding: 10px 30px;">
+                <div style="max-width:1300px; margin:0 auto; padding:12px 24px 0;">
                     {% for category, message in messages %}
                         <div class="alert alert-{{ category }}">{{ message }}</div>
                     {% endfor %}

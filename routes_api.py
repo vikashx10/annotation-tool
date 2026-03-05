@@ -1,72 +1,66 @@
-import os
+import io
 import hashlib
-from pathlib import Path
-from flask import Blueprint, jsonify, request, send_file, current_app, make_response
+from datetime import datetime, timezone
+from flask import Blueprint, jsonify, request, redirect
 from flask_login import login_required, current_user
 from PIL import Image
-from models import db, ImageRecord, Assignment, Annotation, Config
+from models import db, WorkItem, Annotation, Config
 from auth import role_required
+from s3_service import generate_presigned_url, get_object_bytes, put_object, object_exists, list_s3_folders
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 THUMB_SIZE = 200
+THUMB_PREFIX = "thumbnails/"
 
 
-def _get_image_root():
-    cfg = Config.query.get("image_root")
+def _get_bucket():
+    cfg = Config.query.get("s3_bucket")
     return cfg.value if cfg else None
-
-
-def _image_full_path(relative_path):
-    root = _get_image_root()
-    if not root:
-        return None
-    return os.path.join(root, relative_path)
 
 
 @api_bp.route("/image/<int:image_id>")
 @login_required
 def serve_image(image_id):
-    img = ImageRecord.query.get_or_404(image_id)
-    full_path = _image_full_path(img.relative_path)
-    if not full_path or not os.path.exists(full_path):
-        return "Image not found", 404
-    response = make_response(send_file(full_path))
-    response.headers["Cache-Control"] = "public, max-age=3600, immutable"
-    return response
+    item = WorkItem.query.get_or_404(image_id)
+    bucket = _get_bucket()
+    if not bucket:
+        return "S3 not configured", 503
+    url = generate_presigned_url(bucket, item.s3_key)
+    return redirect(url)
 
 
 @api_bp.route("/thumbnail/<int:image_id>")
 @login_required
 def serve_thumbnail(image_id):
-    img = ImageRecord.query.get_or_404(image_id)
-    thumb_dir = os.path.join(current_app.root_path, "static", "thumbnails")
-    os.makedirs(thumb_dir, exist_ok=True)
+    item = WorkItem.query.get_or_404(image_id)
+    bucket = _get_bucket()
+    if not bucket:
+        return "S3 not configured", 503
 
-    # Use hash of relative path for cache key
-    thumb_name = hashlib.md5(img.relative_path.encode()).hexdigest() + ".jpg"
-    thumb_path = os.path.join(thumb_dir, thumb_name)
+    thumb_key = THUMB_PREFIX + hashlib.md5(item.s3_key.encode()).hexdigest() + ".jpg"
 
-    if not os.path.exists(thumb_path):
-        full_path = _image_full_path(img.relative_path)
-        if not full_path or not os.path.exists(full_path):
-            return "Image not found", 404
+    if not object_exists(bucket, thumb_key):
         try:
-            pil_img = Image.open(full_path)
+            raw = get_object_bytes(bucket, item.s3_key)
+            pil_img = Image.open(io.BytesIO(raw))
             pil_img.thumbnail((THUMB_SIZE, THUMB_SIZE))
-            pil_img.save(thumb_path, "JPEG", quality=75)
+            buf = io.BytesIO()
+            pil_img.save(buf, "JPEG", quality=75)
+            buf.seek(0)
+            put_object(bucket, thumb_key, buf.read(), content_type="image/jpeg")
         except Exception:
             return "Failed to create thumbnail", 500
 
-    response = make_response(send_file(thumb_path, mimetype="image/jpeg"))
-    response.headers["Cache-Control"] = "public, max-age=86400, immutable"
-    return response
+    url = generate_presigned_url(bucket, thumb_key)
+    return redirect(url)
 
 
 @api_bp.route("/annotations/<int:image_id>")
 @login_required
 def get_annotations(image_id):
-    anns = Annotation.query.filter_by(image_id=image_id).all()
+    item = WorkItem.query.get_or_404(image_id)
+    anns = Annotation.query.filter_by(s3_key=item.s3_key).all()
     return jsonify([{
         "class_id": a.class_id,
         "x_center": a.x_center,
@@ -79,16 +73,14 @@ def get_annotations(image_id):
 @api_bp.route("/annotations/<int:image_id>", methods=["POST"])
 @login_required
 def save_annotations(image_id):
+    item = WorkItem.query.get_or_404(image_id)
     data = request.get_json() or {}
     boxes = data.get("annotations", [])
 
-    # Delete existing annotations
-    Annotation.query.filter_by(image_id=image_id).delete()
-
-    # Insert new
+    Annotation.query.filter_by(s3_key=item.s3_key).delete()
     for box in boxes:
         db.session.add(Annotation(
-            image_id=image_id,
+            s3_key=item.s3_key,
             class_id=int(box["class_id"]),
             x_center=float(box["x_center"]),
             y_center=float(box["y_center"]),
@@ -109,11 +101,12 @@ def save_and_next():
     if not image_id:
         return jsonify({"status": "error", "message": "No image_id"}), 400
 
-    # Save annotations
-    Annotation.query.filter_by(image_id=image_id).delete()
+    item = WorkItem.query.get_or_404(image_id)
+
+    Annotation.query.filter_by(s3_key=item.s3_key).delete()
     for box in boxes:
         db.session.add(Annotation(
-            image_id=image_id,
+            s3_key=item.s3_key,
             class_id=int(box["class_id"]),
             x_center=float(box["x_center"]),
             y_center=float(box["y_center"]),
@@ -121,90 +114,72 @@ def save_and_next():
             height=float(box["height"]),
         ))
 
-    # Mark as annotated
-    from datetime import datetime, timezone
-    assignment = Assignment.query.filter_by(image_id=image_id).first()
-    if assignment and assignment.status in ("pending", "rejected"):
-        assignment.status = "annotated"
-        assignment.annotated_at = datetime.now(timezone.utc)
+    if item.status in ("pending", "rejected"):
+        item.status = "annotated"
+        item.annotated_at = datetime.now(timezone.utc)
 
     db.session.commit()
 
-    # Find next pending image for this annotator
-    next_assignment = Assignment.query.filter_by(
-        annotator_id=current_user.id,
-        status="pending"
+    next_item = WorkItem.query.filter_by(
+        annotator_id=current_user.id, status="pending"
+    ).first() or WorkItem.query.filter_by(
+        annotator_id=current_user.id, status="rejected"
     ).first()
 
-    # Also check rejected images
-    if not next_assignment:
-        next_assignment = Assignment.query.filter_by(
-            annotator_id=current_user.id,
-            status="rejected"
-        ).first()
-
-    if next_assignment:
-        return jsonify({"status": "ok", "next_image_id": next_assignment.image_id})
+    if next_item:
+        return jsonify({"status": "ok", "next_image_id": next_item.id})
     return jsonify({"status": "done", "message": "No more images to annotate"})
+
+
+@api_bp.route("/s3/browse")
+@login_required
+def s3_browse():
+    """Return immediate sub-folders under a given S3 prefix for the browser UI."""
+    prefix = request.args.get("prefix", "")
+    bucket = _get_bucket()
+    if not bucket:
+        return jsonify({"error": "S3 bucket not configured"}), 503
+    try:
+        folders, has_images = list_s3_folders(bucket, prefix)
+        # Strip trailing slash and get just the folder name for display
+        display = [{"prefix": f, "name": f.rstrip("/").split("/")[-1]} for f in folders]
+        parent = "/".join(prefix.rstrip("/").split("/")[:-1]) + "/" if "/" in prefix.rstrip("/") else ""
+        return jsonify({
+            "bucket": bucket,
+            "current": prefix,
+            "parent": parent if prefix else None,
+            "folders": display,
+            "has_images": has_images,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @api_bp.route("/review/<int:image_id>", methods=["POST"])
 @role_required("oa")
 def review_image(image_id):
     data = request.get_json() or {}
-    action = data.get("action")  # "approve" or "reject"
+    action = data.get("action")
 
-    assignment = Assignment.query.filter_by(image_id=image_id).first()
-    if not assignment:
-        return jsonify({"status": "error", "message": "No assignment found"}), 404
+    item = WorkItem.query.filter_by(id=image_id).first()
+    if not item:
+        return jsonify({"status": "error", "message": "Not found"}), 404
 
-    if assignment.oa_id != current_user.id:
+    if item.oa_id != current_user.id:
         return jsonify({"status": "error", "message": "Not your assignment"}), 403
 
-    from datetime import datetime, timezone
     if action == "approve":
-        assignment.status = "approved"
-        assignment.reviewed_at = datetime.now(timezone.utc)
+        item.status = "approved"
+        item.reviewed_at = datetime.now(timezone.utc)
     elif action == "reject":
-        assignment.status = "rejected"
-        assignment.reviewed_at = datetime.now(timezone.utc)
+        item.status = "rejected"
+        item.reviewed_at = datetime.now(timezone.utc)
     else:
         return jsonify({"status": "error", "message": "Invalid action"}), 400
 
     db.session.commit()
 
-    # Find next image to review
-    next_assignment = Assignment.query.filter_by(
-        oa_id=current_user.id,
-        status="annotated"
-    ).first()
-
-    if next_assignment:
-        return jsonify({"status": "ok", "next_image_id": next_assignment.image_id})
+    next_item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
+    if next_item:
+        return jsonify({"status": "ok", "next_image_id": next_item.id})
     return jsonify({"status": "done", "message": "No more images to review"})
-
-
-@api_bp.route("/browse")
-@login_required
-def browse_dirs():
-    raw = request.args.get("path", "").strip()
-    if not raw:
-        raw = str(Path.home())
-
-    target = Path(raw).resolve()
-    if not target.exists() or not target.is_dir():
-        return jsonify({"status": "error", "message": f"Not a valid directory: {target}"}), 400
-
-    subdirs = []
-    try:
-        for entry in sorted(target.iterdir()):
-            if entry.is_dir() and not entry.name.startswith("."):
-                subdirs.append(entry.name)
-    except PermissionError:
-        return jsonify({"status": "error", "message": f"Permission denied: {target}"}), 403
-
-    return jsonify({
-        "current": str(target),
-        "parent": str(target.parent) if target.parent != target else None,
-        "dirs": subdirs,
-    })
