@@ -82,6 +82,19 @@ def list_s3_folders(bucket, prefix=""):
     return folders, has_images
 
 
+def count_s3_images(bucket, prefix=""):
+    """Count all image objects under bucket/prefix. May be slow for large prefixes."""
+    s3 = get_s3_client()
+    paginator = s3.get_paginator("list_objects_v2")
+    normalized_prefix = prefix.rstrip("/") + "/" if prefix else ""
+    count = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+        for obj in page.get("Contents", []):
+            if os.path.splitext(obj["Key"])[1].lower() in IMAGE_EXTENSIONS:
+                count += 1
+    return count
+
+
 def validate_bucket_access(bucket, prefix=""):
     """Raise ValueError if bucket/prefix is not accessible."""
     s3 = get_s3_client()

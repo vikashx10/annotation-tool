@@ -32,17 +32,13 @@
     </div>
     {% endif %}
 
-    <!-- S3 Bucket -->
-    <div class="card">
-        <h3>S3 Bucket</h3>
-        <form method="POST" action="{{ url_for('admin.set_s3_bucket') }}" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
-            <div class="form-group" style="flex:1; margin-bottom:0;">
-                <input type="text" name="s3_bucket" value="{{ s3_bucket }}" placeholder="my-bucket" required>
-            </div>
-            <button type="submit" class="btn-primary">Save</button>
-        </form>
+    <!-- S3 Bucket (read-only from env) -->
+    <div class="card" style="display:flex; align-items:center; gap:12px;">
+        <h3 style="margin:0;">S3 Bucket</h3>
         {% if s3_bucket %}
-        <p style="margin-top:6px; font-size:0.85em; color:#666;">Current: <code>{{ s3_bucket }}</code></p>
+        <code style="font-size:0.9em; background:#f5f5f5; padding:4px 10px; border-radius:5px; border:1px solid #e5e5e5;">{{ s3_bucket }}</code>
+        {% else %}
+        <span style="color:#dc2626; font-size:0.85em;">⚠ AWS_S3_BUCKET not set in .env</span>
         {% endif %}
     </div>
 
@@ -102,6 +98,8 @@
     <script>
     let s3CurrentPrefix = '';
     const selectedPrefixes = new Set();
+    // Prefixes already assigned to an OA — keyed by prefix, value is OA username
+    const assignedPrefixes = {{ assigned_prefixes | tojson }};
 
     function openS3Browser() {
         s3CurrentPrefix = '';
@@ -138,25 +136,44 @@
 
         if (prefix) {
             const added = selectedPrefixes.has(prefix);
-            html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px;
-                       background:${added ? '#d4edda' : '#fffbe6'}; border-bottom:1px solid #f0f0f0; font-weight:600;">
-                <span style="flex:1;">&#9989; Use current folder <span style="font-weight:400;font-size:0.8em;color:#6c757d;">(all images recursively)</span></span>
-                ${added
-                    ? `<span style="color:#28a745;font-size:0.85em;">✓ Added</span>`
-                    : `<button onclick="addPrefix('${esc(prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
-            </div>`;
+            const takenBy = assignedPrefixes[prefix];
+            if (takenBy) {
+                html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px;
+                           background:#f3f4f6; border-bottom:1px solid #f0f0f0; font-weight:600; opacity:0.7; cursor:not-allowed;">
+                    <span style="flex:1; color:#9ca3af;">&#128274; Use current folder <span style="font-weight:400;font-size:0.8em;">(all images recursively)</span></span>
+                    <span style="color:#b45309;font-size:0.82em; white-space:nowrap;">assigned to ${takenBy}</span>
+                </div>`;
+            } else {
+                html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px;
+                           background:${added ? '#d4edda' : '#fffbe6'}; border-bottom:1px solid #f0f0f0; font-weight:600;">
+                    <span style="flex:1;">&#9989; Use current folder <span style="font-weight:400;font-size:0.8em;color:#6c757d;">(all images recursively)</span></span>
+                    ${added
+                        ? `<span style="color:#28a745;font-size:0.85em;">&#10003; Added</span>`
+                        : `<button onclick="addPrefix('${esc(prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
+                </div>`;
+            }
         }
 
         data.folders.forEach(f => {
             const added = selectedPrefixes.has(f.prefix);
-            html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid #f0f0f0; background:${added ? '#d4edda' : 'white'};">
-                <span onclick="loadS3Folders('${esc(f.prefix)}')" style="flex:1; cursor:pointer; display:flex; align-items:center; gap:8px;">
-                    <span style="color:#111;">&#128193;</span> ${f.name}/
-                </span>
-                ${added
-                    ? `<span style="color:#28a745;font-size:0.85em;">✓ Added</span>`
-                    : `<button onclick="addPrefix('${esc(f.prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
-            </div>`;
+            const takenBy = assignedPrefixes[f.prefix];
+            if (takenBy) {
+                html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid #f0f0f0; background:#f3f4f6; opacity:0.7;">
+                    <span style="flex:1; display:flex; align-items:center; gap:8px; color:#9ca3af; cursor:not-allowed;">
+                        <span>&#128274;</span> ${f.name}/
+                    </span>
+                    <span style="color:#b45309;font-size:0.82em; white-space:nowrap;">assigned to ${takenBy}</span>
+                </div>`;
+            } else {
+                html += `<div style="padding:10px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid #f0f0f0; background:${added ? '#d4edda' : 'white'};">
+                    <span onclick="loadS3Folders('${esc(f.prefix)}')" style="flex:1; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                        <span style="color:#111;">&#128193;</span> ${f.name}/
+                    </span>
+                    ${added
+                        ? `<span style="color:#28a745;font-size:0.85em;">&#10003; Added</span>`
+                        : `<button onclick="addPrefix('${esc(f.prefix)}')" style="padding:3px 12px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;">+ Add</button>`}
+                </div>`;
+            }
         });
 
         if (!data.folders.length && !prefix) {
@@ -264,11 +281,16 @@
                     <td style="font-size:0.82em;">
                         {% if stat.cursor %}
                             {% for c in stat.cursor %}
-                            <div style="margin-bottom:3px;">
+                            <div style="margin-bottom:4px;">
                                 <code>{{ c.prefix or '(root)' }}</code>
                                 {% if c.exhausted %}<span style="color:#dc3545;"> ✓done</span>
                                 {% elif c.last_key %}<span style="color:#28a745;"> ▶active</span>
                                 {% else %}<span style="color:#6c757d;"> ○new</span>{% endif %}
+                                {% if c.total_images is not none %}
+                                <span style="color:#888; font-size:0.85em;">({{ "{:,}".format(c.total_images) }} imgs)</span>
+                                {% else %}
+                                <span id="admin-count-{{ c.id }}" data-cursor-id="{{ c.id }}" style="color:#bbb; font-size:0.85em;">(counting…)</span>
+                                {% endif %}
                             </div>
                             {% endfor %}
                         {% else %}
@@ -328,4 +350,30 @@
         </table>
     </div>
 </div>
+
+<script>
+(function() {
+    const pending = [...document.querySelectorAll('[id^="admin-count-"]')];
+    if (!pending.length) return;
+    const poll = async () => {
+        let stillPending = false;
+        for (const el of pending) {
+            if (el.dataset.done) continue;
+            try {
+                const r = await fetch('/api/cursor_count/' + el.dataset.cursorId);
+                const d = await r.json();
+                if (d.total_images !== null) {
+                    el.textContent = '(' + d.total_images.toLocaleString() + ' imgs)';
+                    el.style.color = '#888';
+                    el.dataset.done = '1';
+                } else {
+                    stillPending = true;
+                }
+            } catch(e) { stillPending = true; }
+        }
+        if (stillPending) setTimeout(poll, 4000);
+    };
+    setTimeout(poll, 4000);
+})();
+</script>
 {% endblock %}

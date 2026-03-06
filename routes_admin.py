@@ -1,13 +1,33 @@
 import io
 import os
+import threading
 import zipfile
-from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file
+from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, current_app
 from flask_login import current_user
-from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation, Config
+from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation
 from auth import role_required
-from s3_service import validate_bucket_access, get_object_bytes
+from s3_service import validate_bucket_access, get_object_bytes, count_s3_images
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def _start_count_thread(app, cursor_id, bucket, prefix):
+    """Count S3 images in background and store result in OaCursor.total_images."""
+    def _run():
+        with app.app_context():
+            try:
+                total = count_s3_images(bucket, prefix)
+                cursor = OaCursor.query.get(cursor_id)
+                if cursor:
+                    cursor.total_images = total
+                    db.session.commit()
+            except Exception as e:
+                print(f"[count_thread] Error counting {prefix}: {e}")
+                db.session.rollback()
+            finally:
+                db.session.remove()  # return connection to pool cleanly
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 @admin_bp.route("/")
@@ -16,8 +36,7 @@ def dashboard():
     users = User.query.order_by(User.role, User.username).all()
     oas = User.query.filter_by(role="oa").all()
 
-    s3_bucket_cfg = Config.query.get("s3_bucket")
-    s3_bucket = s3_bucket_cfg.value if s3_bucket_cfg else ""
+    s3_bucket = os.environ.get("AWS_S3_BUCKET", "").strip()
 
     total_distributed = WorkItem.query.count()
     total_assigned = WorkItem.query.filter(WorkItem.annotator_id.isnot(None)).count()
@@ -45,9 +64,17 @@ def dashboard():
             "managed": managed,
         })
 
+    # Build a set of already-assigned prefixes for the UI to mark as taken
+    assigned_prefixes = {
+        c.prefix: User.query.get(c.oa_id).username
+        for c in OaCursor.query.all()
+        if User.query.get(c.oa_id)
+    }
+
     return render_template("admin/dashboard.html",
         users=users, oas=oas,
         s3_bucket=s3_bucket,
+        assigned_prefixes=assigned_prefixes,
         total_distributed=total_distributed,
         total_assigned=total_assigned,
         total_completed=total_completed,
@@ -55,29 +82,6 @@ def dashboard():
         oa_stats=oa_stats,
     )
 
-
-@admin_bp.route("/set_s3_bucket", methods=["POST"])
-@role_required("admin")
-def set_s3_bucket():
-    bucket = request.form.get("s3_bucket", "").strip()
-    if not bucket:
-        flash("Bucket name is required.", "danger")
-        return redirect(url_for("admin.dashboard"))
-
-    try:
-        validate_bucket_access(bucket)
-    except ValueError as e:
-        flash(str(e), "danger")
-        return redirect(url_for("admin.dashboard"))
-
-    cfg = Config.query.get("s3_bucket")
-    if cfg:
-        cfg.value = bucket
-    else:
-        db.session.add(Config(key="s3_bucket", value=bucket))
-    db.session.commit()
-    flash(f"S3 bucket set to '{bucket}'.", "success")
-    return redirect(url_for("admin.dashboard"))
 
 
 @admin_bp.route("/assign_oa_prefix", methods=["POST"])
@@ -91,18 +95,17 @@ def assign_oa_prefix():
         flash("Select at least one S3 prefix.", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    s3_bucket_cfg = Config.query.get("s3_bucket")
-    if not s3_bucket_cfg or not s3_bucket_cfg.value:
-        flash("Set the S3 bucket first.", "danger")
+    bucket = os.environ.get("AWS_S3_BUCKET", "").strip()
+    if not bucket:
+        flash("AWS_S3_BUCKET is not set in environment.", "danger")
         return redirect(url_for("admin.dashboard"))
-
-    bucket = s3_bucket_cfg.value
     oa = User.query.get_or_404(oa_id)
     if oa.role != "oa":
         flash("Selected user is not an OA.", "danger")
         return redirect(url_for("admin.dashboard"))
 
     added, skipped = 0, 0
+    new_cursors = []  # collect to start threads after commit
     for prefix in prefixes:
         try:
             validate_bucket_access(bucket, prefix)
@@ -111,18 +114,33 @@ def assign_oa_prefix():
             skipped += 1
             continue
 
-        existing = OaCursor.query.filter_by(oa_id=oa_id, prefix=prefix).first()
+        # Block if this prefix is already assigned to ANY OA
+        existing = OaCursor.query.filter_by(prefix=prefix).first()
         if existing:
+            owner = User.query.get(existing.oa_id)
+            owner_name = owner.username if owner else f"OA #{existing.oa_id}"
+            if existing.oa_id == oa_id:
+                flash(f"'{prefix}' is already assigned to {owner_name}.", "warning")
+            else:
+                flash(f"'{prefix}' is already assigned to {owner_name} — cannot assign to multiple OAs.", "danger")
             skipped += 1
             continue
 
-        db.session.add(OaCursor(
+        cursor = OaCursor(
             oa_id=oa_id, bucket=bucket, prefix=prefix,
             continuation_token=None, exhausted=False,
-        ))
+            total_images=None,  # filled by background thread after commit
+        )
+        db.session.add(cursor)
+        new_cursors.append((cursor, bucket, prefix))
         added += 1
 
-    db.session.commit()
+    db.session.commit()  # commit first so cursor IDs exist in DB
+
+    # Start background count threads AFTER commit
+    app = current_app._get_current_object()
+    for cursor, b, p in new_cursors:
+        _start_count_thread(app, cursor.id, b, p)
     flash(f"Assigned {added} new prefix(es) to '{oa.username}'" + (f" ({skipped} skipped/duplicate)" if skipped else "") + ".", "success")
     return redirect(url_for("admin.dashboard"))
 
@@ -172,15 +190,37 @@ def delete_user(user_id):
         flash("Cannot delete yourself.", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    OaAnnotator.query.filter(
-        (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
-    ).delete()
-
     if user.role == "annotator":
-        WorkItem.query.filter_by(annotator_id=user_id).update({"annotator_id": None})
+        # Return ALL of this annotator's work to the OA's unassigned pool.
+        # Annotated items stay reviewable by OA; approved items keep their data.
+        WorkItem.query.filter_by(annotator_id=user_id).update(
+            {"annotator_id": None}, synchronize_session=False
+        )
+        OaAnnotator.query.filter_by(annotator_id=user_id).delete()
+
     elif user.role == "oa":
-        WorkItem.query.filter_by(oa_id=user_id).delete()
+        # Preserve annotated/approved items — null oa_id so they remain for export.
+        WorkItem.query.filter(
+            WorkItem.oa_id == user_id,
+            WorkItem.status.in_(["annotated", "approved"])
+        ).update({"oa_id": None, "annotator_id": None}, synchronize_session=False)
+
+        # Delete un-annotated items — nothing valuable to keep.
+        WorkItem.query.filter(
+            WorkItem.oa_id == user_id,
+            WorkItem.status.in_(["pending", "rejected"])
+        ).delete(synchronize_session=False)
+
+        # Free the S3 prefixes so admin can reassign them.
         OaCursor.query.filter_by(oa_id=user_id).delete()
+        OaAnnotator.query.filter(
+            (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
+        ).delete()
+
+    else:  # admin — no work items owned, just clean up any OA links
+        OaAnnotator.query.filter(
+            (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
+        ).delete()
 
     db.session.delete(user)
     db.session.commit()
@@ -237,8 +277,7 @@ def export_yolo():
         flash("No approved images to export.", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    s3_bucket_cfg = Config.query.get("s3_bucket")
-    bucket = s3_bucket_cfg.value if s3_bucket_cfg else None
+    bucket = os.environ.get("AWS_S3_BUCKET", "").strip() or None
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -246,7 +285,7 @@ def export_yolo():
             if bucket:
                 try:
                     image_bytes = get_object_bytes(bucket, item.s3_key)
-                    zf.writestr(f"images/{item.filename}", image_bytes)
+                    zf.writestr(item.s3_key, image_bytes)  # preserve full path
                 except Exception:
                     pass
 
@@ -256,7 +295,11 @@ def export_yolo():
                 for a in anns
             ]
             label_name = os.path.splitext(item.filename)[0] + ".txt"
-            zf.writestr(f"labels/{label_name}", "\n".join(lines) + ("\n" if lines else ""))
+            # Mirror S3 structure: same relative folder + annotated/ subfolder
+            rel_folder = os.path.dirname(item.s3_key)
+            zip_label_path = f"{rel_folder}/annotated/{label_name}" if rel_folder else f"annotated/{label_name}"
+            zip_image_path = item.s3_key  # keep original path for images
+            zf.writestr(zip_label_path, "\n".join(lines) + ("\n" if lines else ""))
 
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="yolo_export.zip")
