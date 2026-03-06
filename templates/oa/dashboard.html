@@ -123,12 +123,11 @@
         <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef;">
             <h3 style="margin-bottom:4px;">Distribute Images</h3>
             <p style="font-size:0.85em; color:#666; margin-bottom:14px;">
-                {% if has_active_cursor and unassigned_to_annotator > 0 %}
-                    Fetches new images from S3 and also reassigns <strong>{{ unassigned_to_annotator }}</strong> unassigned images from the pool first.
-                {% elif unassigned_to_annotator > 0 %}
-                    S3 cursor exhausted — redistributing <strong>{{ unassigned_to_annotator }}</strong> unassigned images from the pool.
+                {% if has_active_cursor %}
+                Images are fetched from S3 in sequence. Each distribute call picks up where the last one stopped.
                 {% else %}
-                    Images are fetched from S3 in sequence. Each distribute call picks up where the last one stopped.
+                S3 cursor exhausted — no new images from S3. You can still redistribute the
+                <strong>{{ unassigned_to_annotator }}</strong> unassigned images from the pool below.
                 {% endif %}
             </p>
 
@@ -176,13 +175,9 @@
                 </div>
             </form>
         </div>
-        {% elif cursors and not has_active_cursor and unassigned_to_annotator == 0 %}
-        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef; color:#6c757d; font-size:0.88em;">
-            All images fetched from S3 and assigned to annotators. Nothing left to distribute.
-        </div>
-        {% elif not cursors %}
-        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef; color:#6c757d; font-size:0.88em;">
-            No S3 prefixes assigned yet. Contact admin.
+        {% elif cursors and not cursors|selectattr('exhausted','equalto',false)|list and unassigned_to_annotator == 0 %}
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef; color:#6c757d; font-size:0.9em;">
+            S3 cursor exhausted — all images have been listed and assigned. No further distribution available.
         </div>
         {% endif %}
 
