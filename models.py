@@ -46,6 +46,7 @@ class OaCursor(db.Model):
     continuation_token = db.Column(db.Text, nullable=True)  # None = start from beginning
     exhausted = db.Column(db.Boolean, default=False)
     last_key = db.Column(db.String(500), nullable=True)  # last S3 key distributed (progress indicator)
+    total_images = db.Column(db.Integer, nullable=True)   # cached S3 object count (None = not yet counted)
     __table_args__ = (db.UniqueConstraint("oa_id", "prefix", name="uq_oa_prefix"),)
 
     oa = db.relationship("User", foreign_keys=[oa_id])
@@ -59,7 +60,7 @@ class WorkItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     s3_key = db.Column(db.String(500), unique=True, nullable=False, index=True)
     filename = db.Column(db.String(255), nullable=False)
-    oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)   # NULL when OA deleted
     annotator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     status = db.Column(db.String(20), default="pending")  # pending, annotated, approved, rejected
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

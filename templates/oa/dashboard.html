@@ -6,34 +6,89 @@
 <div class="container">
     <!-- S3 Cursor info -->
     {% if cursors %}
-    <div class="card" style="background:#f8f9fa; padding:12px 16px; margin-bottom:16px;">
-        <strong>S3 Prefixes assigned:</strong> {{ cursors|length }} &nbsp;|&nbsp; <strong>Distributed so far:</strong> {{ total_distributed }}
-        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
-        {% for c in cursors %}
-            <span style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #dee2e6;border-radius:16px;padding:4px 12px;font-size:0.83em;">
-                <span style="color:#111;">&#128193;</span>
-                <code>{{ c.prefix or '(root)' }}</code>
-                {% if c.exhausted %}<span style="color:#dc3545;">✓ done</span>
-                {% elif c.last_key %}<span style="color:#28a745;">▶ active</span>
-                {% else %}<span style="color:#6c757d;">○ not started</span>{% endif %}
+    <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+            <span style="font-size:0.82rem; color:#555;">
+                <strong style="color:#111;">{{ cursors|length }}</strong> S3 prefix{{ 'es' if cursors|length != 1 else '' }} assigned
             </span>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+        {% for c in cursors %}
+            <div style="display:flex; align-items:center; gap:10px; background:#f8f9fa; border:1px solid #e9ecef; border-radius:8px; padding:8px 12px;">
+                <span style="color:#888; font-size:13px;">&#128193;</span>
+                <code style="font-size:0.8em; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ c.prefix or '(root)' }}</code>
+
+                <!-- Total images count -->
+                <span id="count-label-{{ c.id }}"
+                      data-cursor-id="{{ c.id }}"
+                      data-counted="{{ 'yes' if c.total_images is not none else 'no' }}"
+                      style="font-size:0.8em; color:#555; white-space:nowrap;">
+                    {% if c.total_images is not none %}
+                        <strong>{{ "{:,}".format(c.total_images) }}</strong> images
+                    {% else %}
+                        <span style="color:#aaa;">Counting…</span>
+                    {% endif %}
+                </span>
+
+                <!-- Status -->
+                {% if c.exhausted %}
+                    <span style="font-size:0.78em; color:#dc3545; white-space:nowrap;">✓ done</span>
+                {% elif c.last_key %}
+                    <span style="font-size:0.78em; color:#28a745; white-space:nowrap;">▶ active</span>
+                {% else %}
+                    <span style="font-size:0.78em; color:#aaa; white-space:nowrap;">○ not started</span>
+                {% endif %}
+            </div>
         {% endfor %}
         </div>
     </div>
+
+    <script>
+    // Poll for any prefix counts still being calculated
+    (function() {
+        const pending = [...document.querySelectorAll('[data-counted="no"]')];
+        if (!pending.length) return;
+        const poll = async () => {
+            let stillPending = false;
+            for (const el of pending) {
+                if (el.dataset.counted === 'yes') continue;
+                try {
+                    const r = await fetch('/api/cursor_count/' + el.dataset.cursorId);
+                    const d = await r.json();
+                    if (d.total_images !== null) {
+                        el.innerHTML = '<strong>' + d.total_images.toLocaleString() + '</strong> images';
+                        el.dataset.counted = 'yes';
+                    } else {
+                        stillPending = true;
+                    }
+                } catch(e) { stillPending = true; }
+            }
+            if (stillPending) setTimeout(poll, 4000);
+        };
+        setTimeout(poll, 4000);
+    })();
+    </script>
     {% endif %}
 
     <!-- Stats -->
     <div class="stat-grid">
         <div class="stat-card">
-            <div class="label">Distributed</div>
+            <div class="label">Assigned to Annotators</div>
             <div class="value">{{ total_distributed }}</div>
         </div>
+        {% if unassigned_to_annotator > 0 %}
+        <div class="stat-card" style="border-color:#f59e0b;">
+            <div class="label">Unassigned Pool</div>
+            <div class="value amber">{{ unassigned_to_annotator }}</div>
+            <div style="font-size:0.72rem; color:#888; margin-top:4px;">will be used on next distribute</div>
+        </div>
+        {% endif %}
         <div class="stat-card">
-            <div class="label">Pending</div>
+            <div class="label">Annotator Pending</div>
             <div class="value muted">{{ total_pending }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">To Review</div>
+            <div class="label">Awaiting Review</div>
             <div class="value amber">{{ total_annotated }}</div>
         </div>
         <div class="stat-card">
