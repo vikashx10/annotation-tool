@@ -187,8 +187,9 @@ def distribute():
       custom — per-annotator counts via count_<id> fields
     """
     cursors = OaCursor.query.filter_by(oa_id=current_user.id, exhausted=False).all()
-    if not cursors:
-        flash("No active S3 prefixes. Ask admin to assign prefixes.", "danger")
+    has_pool = WorkItem.query.filter_by(oa_id=current_user.id, annotator_id=None, status="pending").count() > 0
+    if not cursors and not has_pool:
+        flash("No active S3 prefixes and no unassigned pool. Ask admin to assign prefixes.", "danger")
         return redirect(url_for("oa.dashboard"))
 
     links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
