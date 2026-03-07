@@ -306,6 +306,36 @@ def peek_next():
     return jsonify({"next_image_id": item.id if item else None})
 
 
+@api_bp.route("/peek_next_review")
+@login_required
+def peek_next_review():
+    """Return the next reviewable image ID for Junior OA or Senior OA.
+    No side effects — used only for prefetching.
+    """
+    current_id = request.args.get("current_id", type=int)
+    item = None
+
+    if current_user.role == "junior_oa":
+        item = WorkItem.query.filter(
+            WorkItem.oa_id == current_user.id,
+            WorkItem.status == "annotated",
+            WorkItem.id != current_id,
+        ).first()
+
+    elif current_user.role == "senior_oa":
+        from models import SeniorJuniorOa
+        links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
+        junior_ids = [l.junior_oa_id for l in links]
+        if junior_ids:
+            item = WorkItem.query.filter(
+                WorkItem.oa_id.in_(junior_ids),
+                WorkItem.status == "junior_approved",
+                WorkItem.id != current_id,
+            ).first()
+
+    return jsonify({"next_image_id": item.id if item else None})
+
+
 @api_bp.route("/cursor_count/<int:cursor_id>")
 @login_required
 def cursor_count(cursor_id):

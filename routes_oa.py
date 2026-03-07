@@ -77,7 +77,11 @@ def dashboard():
         WorkItem.annotator_id.isnot(None)
     ).count()
     total_annotated       = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").count()
-    total_junior_approved = WorkItem.query.filter_by(oa_id=current_user.id, status="junior_approved").count()
+    total_awaiting_senior = WorkItem.query.filter_by(oa_id=current_user.id, status="junior_approved").count()
+    total_junior_approved = WorkItem.query.filter(
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status.in_(["junior_approved", "approved"])
+    ).count()
     total_approved        = WorkItem.query.filter_by(oa_id=current_user.id, status="approved").count()
     total_rejected        = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected").count()
     total_pending   = WorkItem.query.filter(
@@ -90,9 +94,15 @@ def dashboard():
     annotator_stats = []
     for ann in managed_annotators:
         assigned = WorkItem.query.filter_by(oa_id=current_user.id, annotator_id=ann.id).count()
-        done = WorkItem.query.filter_by(oa_id=current_user.id, annotator_id=ann.id)\
-            .filter(WorkItem.status.in_(["annotated", "approved"])).count()
-        annotator_stats.append({"user": ann, "assigned": assigned, "done": done})
+        awaiting_junior = WorkItem.query.filter_by(
+            oa_id=current_user.id, annotator_id=ann.id, status="annotated"
+        ).count()
+        done = WorkItem.query.filter(
+            WorkItem.oa_id == current_user.id,
+            WorkItem.annotator_id == ann.id,
+            WorkItem.status.in_(["annotated", "junior_approved", "approved"])
+        ).count()
+        annotator_stats.append({"user": ann, "assigned": assigned, "awaiting_junior": awaiting_junior, "done": done})
 
     return render_template("oa/dashboard.html",
         managed_annotators=managed_annotators,
@@ -101,6 +111,7 @@ def dashboard():
         cursors=cursors,
         total_distributed=total_distributed,
         total_annotated=total_annotated,
+        total_awaiting_senior=total_awaiting_senior,
         total_junior_approved=total_junior_approved,
         total_approved=total_approved,
         total_rejected=total_rejected,

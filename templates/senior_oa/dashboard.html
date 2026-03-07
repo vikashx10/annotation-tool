@@ -44,6 +44,7 @@
                     <th>Junior OA</th>
                     <th>Total Distributed</th>
                     <th>Junior Approved</th>
+                    <th>Awaiting Final Review</th>
                     <th>Final Approved</th>
                     <th>Actions</th>
                 </tr>
@@ -53,7 +54,8 @@
                 <tr>
                     <td>{{ stat.user.username }}</td>
                     <td>{{ stat.total }}</td>
-                    <td><span class="badge badge-annotated">{{ stat.junior_approved }}</span></td>
+                    <td style="font-weight:600;">{{ stat.junior_approved }}</td>
+                    <td><span class="badge badge-annotated">{{ stat.awaiting }}</span></td>
                     <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
                     <td>
                         <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">

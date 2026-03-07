@@ -92,16 +92,16 @@
             <div class="value amber">{{ total_annotated }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Junior Approved</div>
+            <div class="label">Junior Approved (total)</div>
             <div class="value muted">{{ total_junior_approved }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Awaiting Senior Review</div>
+            <div class="value amber">{{ total_awaiting_senior }}</div>
         </div>
         <div class="stat-card">
             <div class="label">Final Approved</div>
             <div class="value green">{{ total_approved }}</div>
-        </div>
-        <div class="stat-card">
-            <div class="label">Rejected</div>
-            <div class="value red">{{ total_rejected }}</div>
         </div>
     </div>
 
@@ -240,14 +240,15 @@
         {% if annotator_stats %}
         <table>
             <thead>
-                <tr><th>Annotator</th><th>Assigned</th><th>Done</th><th>Progress</th><th>Actions</th></tr>
+                <tr><th>Annotator</th><th>Assigned</th><th>Total Completed</th><th>Awaiting Junior Review</th><th>Progress</th><th>Actions</th></tr>
             </thead>
             <tbody>
                 {% for stat in annotator_stats %}
                 <tr>
                     <td>{{ stat.user.username }}</td>
                     <td>{{ stat.assigned }}</td>
-                    <td>{{ stat.done }}</td>
+                    <td style="font-weight:600;">{{ stat.done }}</td>
+                    <td><span class="badge badge-annotated">{{ stat.awaiting_junior }}</span></td>
                     <td>
                         {% if stat.assigned > 0 %}
                         <div class="progress-bar-container" style="height:16px; width:120px; display:inline-block;">

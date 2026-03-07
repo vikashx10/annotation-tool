@@ -31,7 +31,10 @@ def grid_data():
     base = WorkItem.query.filter_by(annotator_id=current_user.id)
     total = base.count()
     pending = base.filter(WorkItem.status.in_(["pending", "rejected"])).count()
-    done = base.filter(WorkItem.status.in_(["annotated", "approved"])).count()
+    cnt_annotated = WorkItem.query.filter_by(annotator_id=current_user.id, status="annotated").count()
+    cnt_junior_approved = WorkItem.query.filter_by(annotator_id=current_user.id, status="junior_approved").count()
+    cnt_approved = WorkItem.query.filter_by(annotator_id=current_user.id, status="approved").count()
+    done = cnt_annotated + cnt_junior_approved + cnt_approved
 
     paginated = query.order_by(WorkItem.status.desc(), WorkItem.id)\
         .paginate(page=page, per_page=PAGE_SIZE, error_out=False)
@@ -46,6 +49,9 @@ def grid_data():
         "total": total,
         "pending": pending,
         "done": done,
+        "cnt_annotated": cnt_annotated,
+        "cnt_junior_approved": cnt_junior_approved,
+        "cnt_approved": cnt_approved,
         "page": page,
         "pages": paginated.pages,
         "has_next": paginated.has_next,
