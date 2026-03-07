@@ -2,6 +2,12 @@
 {% block title %}Annotate{% endblock %}
 {% block header_title %}Annotate{% endblock %}
 
+{% block head %}
+{% if image_id %}
+<link rel="preload" href="/api/image/{{ image_id }}" as="image">
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="annotate-layout">
 
@@ -76,11 +82,63 @@
             });
             if (!resp.ok) throw new Error('Save failed');
         },
-        onAnnotationsChanged: () => {
-            updateInfo();
-            renderAnnList();
-        }
+        onAnnotationsChanged: () => { updateInfo(); renderAnnList(); }
     });
+
+    // ── Prefetch cache ──────────────────────────────────────────────────────
+    // Maps imageId → { imgElement: HTMLImageElement, annotations: [] }
+    // Null value means "fetch in progress".
+    const _cache = new Map();
+    const CACHE_MAX = 3; // keep at most N entries to limit memory
+
+    async function _prefetch(imageId) {
+        if (!imageId || _cache.has(imageId)) return;
+        _cache.set(imageId, null); // mark in-progress
+
+        try {
+            // Fetch annotations and image bytes in parallel
+            const [annResp, imgResp] = await Promise.all([
+                fetch(`/api/annotations/${imageId}`),
+                fetch(`/api/image/${imageId}`),   // follows presigned-URL redirect
+            ]);
+            const annotations = await annResp.json();
+            const blob = await imgResp.blob();
+            const blobUrl = URL.createObjectURL(blob);
+
+            await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    _cache.set(imageId, { imgElement: img, annotations, blobUrl });
+                    resolve();
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    _cache.delete(imageId);
+                    reject();
+                };
+                img.src = blobUrl;
+            });
+        } catch (e) {
+            _cache.delete(imageId); // allow retry on next opportunity
+        }
+
+        // Evict oldest entries beyond CACHE_MAX
+        if (_cache.size > CACHE_MAX) {
+            const oldest = _cache.keys().next().value;
+            const entry = _cache.get(oldest);
+            if (entry && entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+            _cache.delete(oldest);
+        }
+    }
+
+    async function _kickPrefetch(afterId) {
+        try {
+            const resp = await fetch(`/api/peek_next?current_id=${afterId}`);
+            const data = await resp.json();
+            if (data.next_image_id) _prefetch(data.next_image_id);
+        } catch (e) {}
+    }
+    // ───────────────────────────────────────────────────────────────────────
 
     function toggleDraw() {
         const on = ac.toggleDrawMode();
@@ -129,11 +187,25 @@
             return;
         }
         currentImageId = imageId;
+
+        const cached = _cache.get(imageId);
+        if (cached) {
+            // Instant render from prefetch cache — no network wait
+            ac.loadFromCache(imageId, cached.imgElement, cached.annotations);
+            updateInfo();
+            renderAnnList();
+            history.replaceState(null, '', `/annotator/annotate/${imageId}`);
+            _kickPrefetch(imageId);
+            return;
+        }
+
+        // Cache miss — normal load, then start prefetching next
         try {
             await ac.loadImage(imageId);
             updateInfo();
             renderAnnList();
             history.replaceState(null, '', `/annotator/annotate/${imageId}`);
+            _kickPrefetch(imageId);
         } catch (e) {
             showToast('Failed to load image', 'error');
         }
@@ -148,6 +220,7 @@
 
     async function saveAndNext() {
         if (!currentImageId) return;
+        document.getElementById('saveNextBtn').disabled = true;
         try {
             const resp = await fetch('/api/save_and_next', {
                 method: 'POST',
@@ -159,16 +232,19 @@
             });
             const data = await resp.json();
             if (data.status === 'ok') {
-                showToast('Saved! Loading next...', 'success');
+                showToast('Saved!', 'success');
                 await loadImage(data.next_image_id);
             } else {
                 showToast(data.message || 'All done!', 'success');
                 document.getElementById('imageInfo').innerHTML = '<strong>All images annotated!</strong>';
                 document.getElementById('saveNextBtn').disabled = true;
+                return;
             }
             loadProgress();
         } catch (e) {
             showToast('Error: ' + e.message, 'error');
+        } finally {
+            if (currentImageId) document.getElementById('saveNextBtn').disabled = false;
         }
     }
 

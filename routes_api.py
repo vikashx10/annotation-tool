@@ -2,7 +2,7 @@ import io
 import os
 import hashlib
 from datetime import datetime, timezone
-from flask import Blueprint, jsonify, request, redirect
+from flask import Blueprint, jsonify, request, redirect, Response
 from flask_login import login_required, current_user
 from PIL import Image
 from models import db, WorkItem, Annotation
@@ -29,6 +29,20 @@ def _image_key_to_label_key(s3_key):
     return f"{folder}/annotated/{stem}.txt" if folder else f"annotated/{stem}.txt"
 
 
+_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "gif": "image/gif", "webp": "image/webp",
+}
+
+
+def _image_response(raw_bytes, s3_key, max_age=3600):
+    ext = os.path.splitext(s3_key)[1].lstrip(".").lower()
+    mime = _MIME.get(ext, "image/jpeg")
+    resp = Response(raw_bytes, mimetype=mime)
+    resp.headers["Cache-Control"] = f"public, max-age={max_age}"
+    return resp
+
+
 @api_bp.route("/image/<int:image_id>")
 @login_required
 def serve_image(image_id):
@@ -36,8 +50,11 @@ def serve_image(image_id):
     bucket = _get_bucket()
     if not bucket:
         return "S3 not configured", 503
-    url = generate_presigned_url(bucket, item.s3_key)
-    return redirect(url)
+    try:
+        raw = get_object_bytes(bucket, item.s3_key)
+    except Exception:
+        return "Image not found", 404
+    return _image_response(raw, item.s3_key, max_age=3600)
 
 
 @api_bp.route("/thumbnail/<int:image_id>")
@@ -62,8 +79,11 @@ def serve_thumbnail(image_id):
         except Exception:
             return "Failed to create thumbnail", 500
 
-    url = generate_presigned_url(bucket, thumb_key)
-    return redirect(url)
+    try:
+        thumb_raw = get_object_bytes(bucket, thumb_key)
+    except Exception:
+        return "Thumbnail not found", 404
+    return _image_response(thumb_raw, thumb_key, max_age=86400)
 
 
 @api_bp.route("/annotations/<int:image_id>")
@@ -165,51 +185,125 @@ def s3_browse():
         return jsonify({"error": str(e)}), 500
 
 
+def _save_annotations_for_key(s3_key, boxes):
+    """Replace all annotations for s3_key with the provided boxes."""
+    Annotation.query.filter_by(s3_key=s3_key).delete()
+    for box in boxes:
+        db.session.add(Annotation(
+            s3_key=s3_key,
+            class_id=int(box["class_id"]),
+            x_center=float(box["x_center"]),
+            y_center=float(box["y_center"]),
+            width=float(box["width"]),
+            height=float(box["height"]),
+        ))
+
+
+def _write_label_to_s3(item):
+    """Write YOLO label file to S3 at path/annotated/stem.txt."""
+    bucket = _get_bucket()
+    if not bucket:
+        return
+    anns = Annotation.query.filter_by(s3_key=item.s3_key).all()
+    lines = [
+        f"{a.class_id} {a.x_center:.6f} {a.y_center:.6f} {a.width:.6f} {a.height:.6f}"
+        for a in anns
+    ]
+    label_key = _image_key_to_label_key(item.s3_key)
+    try:
+        put_object(bucket, label_key,
+                   ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8"),
+                   content_type="text/plain")
+    except Exception:
+        import traceback; traceback.print_exc()
+
+
 @api_bp.route("/review/<int:image_id>", methods=["POST"])
-@role_required("oa")
+@login_required
 def review_image(image_id):
+    """
+    Two-level OA review — both levels can edit annotations before approving.
+    Junior OA  (role=oa)        : annotated       → junior_approved
+    Senior OA  (role=senior_oa) : junior_approved  → approved  (+ S3 label write)
+    No rejection — OAs edit instead of rejecting.
+    """
+    if current_user.role not in ("junior_oa", "senior_oa"):
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
+
     data = request.get_json() or {}
-    action = data.get("action")
+    if data.get("action") != "approve":
+        return jsonify({"status": "error", "message": "Invalid action"}), 400
+
+    annotations = data.get("annotations", [])
 
     item = WorkItem.query.filter_by(id=image_id).first()
     if not item:
         return jsonify({"status": "error", "message": "Not found"}), 404
 
-    if item.oa_id != current_user.id:
-        return jsonify({"status": "error", "message": "Not your assignment"}), 403
+    if current_user.role == "junior_oa":
+        if item.oa_id != current_user.id:
+            return jsonify({"status": "error", "message": "Not your assignment"}), 403
+        if item.status != "annotated":
+            return jsonify({"status": "error", "message": "Item is not annotated"}), 400
 
-    if action == "approve":
+        _save_annotations_for_key(item.s3_key, annotations)
+        item.status = "junior_approved"
+        item.reviewed_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        next_item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
+
+    else:  # senior_oa
+        from models import SeniorJuniorOa
+        if item.oa_id:
+            link = SeniorJuniorOa.query.filter_by(
+                senior_oa_id=current_user.id, junior_oa_id=item.oa_id
+            ).first()
+            if not link:
+                return jsonify({"status": "error", "message": "Not your assignment"}), 403
+        if item.status != "junior_approved":
+            return jsonify({"status": "error", "message": "Item is not junior_approved"}), 400
+
+        _save_annotations_for_key(item.s3_key, annotations)
         item.status = "approved"
         item.reviewed_at = datetime.now(timezone.utc)
+        db.session.commit()
+        _write_label_to_s3(item)
 
-        # Write YOLO label file to S3 next to the image
-        bucket = _get_bucket()
-        if bucket:
-            anns = Annotation.query.filter_by(s3_key=item.s3_key).all()
-            lines = [
-                f"{a.class_id} {a.x_center:.6f} {a.y_center:.6f} {a.width:.6f} {a.height:.6f}"
-                for a in anns
-            ]
-            label_content = "\n".join(lines) + ("\n" if lines else "")
-            label_key = _image_key_to_label_key(item.s3_key)
-            try:
-                put_object(bucket, label_key, label_content.encode("utf-8"), content_type="text/plain")
-            except Exception as e:
-                # Don't block approval if S3 write fails — log and continue
-                import traceback; traceback.print_exc()
+        links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
+        junior_ids = [l.junior_oa_id for l in links]
+        next_item = (
+            WorkItem.query.filter(
+                WorkItem.oa_id.in_(junior_ids),
+                WorkItem.status == "junior_approved"
+            ).first()
+            if junior_ids else None
+        )
 
-    elif action == "reject":
-        item.status = "rejected"
-        item.reviewed_at = datetime.now(timezone.utc)
-    else:
-        return jsonify({"status": "error", "message": "Invalid action"}), 400
-
-    db.session.commit()
-
-    next_item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
     if next_item:
         return jsonify({"status": "ok", "next_image_id": next_item.id})
     return jsonify({"status": "done", "message": "No more images to review"})
+
+
+@api_bp.route("/peek_next")
+@login_required
+def peek_next():
+    """Return the next pending/rejected image ID for the current annotator.
+    Used for prefetching — no side effects, no state change.
+    """
+    current_id = request.args.get("current_id", type=int)
+    item = WorkItem.query.filter(
+        WorkItem.annotator_id == current_user.id,
+        WorkItem.status == "pending",
+        WorkItem.id != current_id,
+    ).first()
+    if not item:
+        item = WorkItem.query.filter(
+            WorkItem.annotator_id == current_user.id,
+            WorkItem.status == "rejected",
+            WorkItem.id != current_id,
+        ).first()
+    return jsonify({"next_image_id": item.id if item else None})
 
 
 @api_bp.route("/cursor_count/<int:cursor_id>")

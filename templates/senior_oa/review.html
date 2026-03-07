@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Review{% endblock %}
-{% block header_title %}Junior OA Review{% endblock %}
+{% block title %}Final Review{% endblock %}
+{% block header_title %}Senior OA Review{% endblock %}
 
 {% block content %}
 <div class="review-layout">
@@ -25,7 +25,7 @@
         </div>
 
         <button class="review-approve btn" id="approveBtn" onclick="doApprove()">
-            Approve <span class="kbd">A</span>
+            Final Approve <span class="kbd">A</span>
         </button>
 
         <!-- Annotation list -->
@@ -36,8 +36,7 @@
             <div id="annList" style="font-size:0.82rem;"></div>
         </div>
 
-        <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary btn-sm">Grid</a>
-        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary btn-sm">Dashboard</a>
+        <a href="{{ url_for('senior_oa.dashboard') }}" class="btn btn-secondary btn-sm">Dashboard</a>
     </div>
 
     <!-- Canvas area -->
@@ -111,7 +110,7 @@
             document.getElementById('reviewMeta').innerHTML =
                 `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${count}`;
             renderAnnList();
-            history.replaceState(null, '', `/oa/review/${imageId}`);
+            history.replaceState(null, '', `/senior_oa/review/${imageId}`);
         } catch (e) {
             showToast('Failed to load image', 'error');
         }
@@ -128,10 +127,10 @@
             });
             const data = await resp.json();
             if (data.status === 'ok') {
-                showToast('Approved!', 'success');
+                showToast('Final approved!', 'success');
                 await loadImage(data.next_image_id);
             } else if (data.status === 'done') {
-                showToast('All images reviewed!', 'success');
+                showToast('All images final-approved!', 'success');
                 document.getElementById('reviewMeta').innerHTML = '<strong>All reviewed!</strong>';
                 currentImageId = null;
             } else {

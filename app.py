@@ -66,6 +66,13 @@ def _migrate_db(app):
                 except Exception:
                     pass
 
+            # Rename legacy 'oa' role to 'junior_oa'
+            try:
+                conn.execute(text("UPDATE users SET role='junior_oa' WHERE role='oa'"))
+                conn.commit()
+            except Exception:
+                pass
+
 
 def create_app():
     app = Flask(__name__)
@@ -109,6 +116,9 @@ def create_app():
 
     from routes_oa import oa_bp
     app.register_blueprint(oa_bp)
+
+    from routes_senior_oa import senior_oa_bp
+    app.register_blueprint(senior_oa_bp)
 
     @app.route("/")
     def index():

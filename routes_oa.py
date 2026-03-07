@@ -9,35 +9,23 @@ from s3_service import get_s3_client
 oa_bp = Blueprint("oa", __name__, url_prefix="/oa")
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-DISTRIBUTE_BATCH = 500
+_INSERT_BATCH = 2000
 
 
-def _fetch_and_create_work_items(cursor, annotator_id, count):
-    """Advance the OA's S3 cursor by `count` images, create WorkItems in batches.
+def _collect_keys_from_cursor(cursor, count, existing_keys):
+    """List up to `count` new image keys from S3, advancing the cursor.
 
-    Returns the number of WorkItems actually created.
-    Deduplication layers:
-      1. S3 cursor continuation_token — never re-lists already-seen pages
-      2. existing_keys set scoped to this prefix — catches any in-prefix duplicates
-      3. INSERT OR IGNORE — silently skips any DB-level UNIQUE violations
+    Only does S3 API calls — no DB writes. Mutates cursor.continuation_token,
+    cursor.exhausted, cursor.last_key in-place.
     """
     if cursor.exhausted or count <= 0:
-        return 0
+        return []
 
     s3 = get_s3_client()
     normalized_prefix = cursor.prefix.rstrip("/") + "/" if cursor.prefix else ""
-
-    # Scope existing_keys to THIS prefix only — avoids loading millions of unrelated keys
-    existing_keys = set(
-        row[0] for row in db.session.query(WorkItem.s3_key)
-        .filter(WorkItem.s3_key.like(normalized_prefix + "%"))
-        .all()
-    )
-
     collected = []
-    exhausted = False
 
-    while len(collected) < count and not exhausted:
+    while len(collected) < count:
         kwargs = {
             "Bucket": cursor.bucket,
             "Prefix": normalized_prefix,
@@ -53,16 +41,10 @@ def _fetch_and_create_work_items(cursor, annotator_id, count):
             if os.path.splitext(key)[1].lower() not in IMAGE_EXTENSIONS:
                 continue
             if key in existing_keys:
-                continue                      # already distributed — skip
-            existing_keys.add(key)            # mark in-flight to block duplicates within this call
+                continue
+            existing_keys.add(key)
             cursor.last_key = key
-            collected.append({
-                "s3_key": key,
-                "filename": os.path.basename(key),
-                "oa_id": cursor.oa_id,
-                "annotator_id": annotator_id,
-                "status": "pending",
-            })
+            collected.append(key)
             if len(collected) >= count:
                 break
 
@@ -70,24 +52,14 @@ def _fetch_and_create_work_items(cursor, annotator_id, count):
             cursor.continuation_token = resp["NextContinuationToken"]
         else:
             cursor.continuation_token = None
-            exhausted = True
+            cursor.exhausted = True
+            break
 
-    cursor.exhausted = exhausted
-
-    # INSERT OR IGNORE — any race-condition duplicate silently skipped at DB level
-    total_created = 0
-    for i in range(0, len(collected), DISTRIBUTE_BATCH):
-        chunk = collected[i:i + DISTRIBUTE_BATCH]
-        stmt = sqlite_insert(WorkItem.__table__).values(chunk).prefix_with("OR IGNORE")
-        result = db.session.execute(stmt)
-        db.session.commit()
-        total_created += result.rowcount  # only counts rows actually inserted
-
-    return total_created
+    return collected
 
 
 @oa_bp.route("/")
-@role_required("oa")
+@role_required("junior_oa")
 def dashboard():
     links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
     annotator_ids = [l.annotator_id for l in links]
@@ -104,9 +76,10 @@ def dashboard():
         WorkItem.oa_id == current_user.id,
         WorkItem.annotator_id.isnot(None)
     ).count()
-    total_annotated = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").count()
-    total_approved  = WorkItem.query.filter_by(oa_id=current_user.id, status="approved").count()
-    total_rejected  = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected").count()
+    total_annotated       = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").count()
+    total_junior_approved = WorkItem.query.filter_by(oa_id=current_user.id, status="junior_approved").count()
+    total_approved        = WorkItem.query.filter_by(oa_id=current_user.id, status="approved").count()
+    total_rejected        = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected").count()
     total_pending   = WorkItem.query.filter(
         WorkItem.oa_id == current_user.id,
         WorkItem.status == "pending",
@@ -128,6 +101,7 @@ def dashboard():
         cursors=cursors,
         total_distributed=total_distributed,
         total_annotated=total_annotated,
+        total_junior_approved=total_junior_approved,
         total_approved=total_approved,
         total_rejected=total_rejected,
         total_pending=total_pending,
@@ -136,7 +110,7 @@ def dashboard():
 
 
 @oa_bp.route("/add_annotator", methods=["POST"])
-@role_required("oa")
+@role_required("junior_oa")
 def add_annotator():
     annotator_id = request.form.get("annotator_id", type=int)
     if not annotator_id:
@@ -160,7 +134,7 @@ def add_annotator():
 
 
 @oa_bp.route("/remove_annotator/<int:annotator_id>", methods=["POST"])
-@role_required("oa")
+@role_required("junior_oa")
 def remove_annotator(annotator_id):
     link = OaAnnotator.query.filter_by(oa_id=current_user.id, annotator_id=annotator_id).first()
     if link:
@@ -178,7 +152,7 @@ def remove_annotator(annotator_id):
 
 
 @oa_bp.route("/distribute", methods=["POST"])
-@role_required("oa")
+@role_required("junior_oa")
 def distribute():
     """Fetch images from S3 using cursor and distribute to annotators.
 
@@ -218,34 +192,82 @@ def distribute():
         return redirect(url_for("oa.dashboard"))
 
     total_created = 0
+    # Track how many more each annotator still needs after pool re-assignment
+    remaining = dict(distribution)
+
+    # ── Step 1: re-assign from the unassigned pool first (fast DB ops only) ──
     for annotator_id, count in distribution.items():
-        remaining = count
+        if count <= 0:
+            continue
+        pool_ids = [
+            row[0] for row in db.session.query(WorkItem.id)
+            .filter_by(oa_id=current_user.id, annotator_id=None, status="pending")
+            .limit(count)
+            .all()
+        ]
+        if pool_ids:
+            reassigned = WorkItem.query.filter(
+                WorkItem.id.in_(pool_ids),
+                WorkItem.annotator_id.is_(None)
+            ).update({"annotator_id": annotator_id}, synchronize_session=False)
+            remaining[annotator_id] = count - reassigned
+            total_created += reassigned
 
-        # First: re-assign from the unassigned pool (deselected images)
-        if remaining > 0:
-            pool_ids = [
-                row[0] for row in db.session.query(WorkItem.id)
-                .filter_by(oa_id=current_user.id, annotator_id=None, status="pending")
-                .limit(remaining)
-            ]
-            if pool_ids:
-                reassigned = WorkItem.query.filter(
-                    WorkItem.id.in_(pool_ids),
-                    WorkItem.annotator_id.is_(None)  # re-check still unassigned
-                ).update({"annotator_id": annotator_id}, synchronize_session=False)
-                db.session.commit()
-                remaining -= reassigned
-                total_created += reassigned
+    db.session.commit()  # commit pool re-assignments
 
-        # Then: fetch new images from S3 cursor if still needed
+    # ── Step 2: fetch from S3 in a single combined pass for all annotators ───
+    total_needed = sum(v for v in remaining.values() if v > 0)
+    if total_needed > 0 and cursors:
+        # Build shared existing_keys across all active cursors' prefixes (single DB query)
+        prefixes = list({
+            (c.prefix.rstrip("/") + "/" if c.prefix else "") for c in cursors
+        })
+        existing_keys = set()
+        for pfx in prefixes:
+            existing_keys.update(
+                row[0] for row in db.session.query(WorkItem.s3_key)
+                .filter(WorkItem.s3_key.like(pfx + "%"))
+                .all()
+            )
+
+        # Collect all needed keys from cursors sequentially (continuation-token order)
+        all_new_keys = []
         for cursor in cursors:
-            if remaining <= 0 or cursor.exhausted:
+            if len(all_new_keys) >= total_needed or cursor.exhausted:
                 continue
-            created = _fetch_and_create_work_items(cursor, annotator_id, remaining)
-            remaining -= created
-            total_created += created
+            keys = _collect_keys_from_cursor(
+                cursor, total_needed - len(all_new_keys), existing_keys
+            )
+            all_new_keys.extend(keys)
 
-    db.session.commit()  # persist all cursor states
+        # Assign collected keys to annotators in the requested proportions
+        rows_to_insert = []
+        idx = 0
+        for annotator_id, need in remaining.items():
+            if need <= 0:
+                continue
+            chunk = all_new_keys[idx:idx + need]
+            idx += len(chunk)
+            for key in chunk:
+                rows_to_insert.append({
+                    "s3_key": key,
+                    "filename": os.path.basename(key),
+                    "oa_id": current_user.id,
+                    "annotator_id": annotator_id,
+                    "status": "pending",
+                })
+
+        # Single bulk insert — one commit for all annotators
+        for i in range(0, len(rows_to_insert), _INSERT_BATCH):
+            stmt = (
+                sqlite_insert(WorkItem.__table__)
+                .values(rows_to_insert[i:i + _INSERT_BATCH])
+                .prefix_with("OR IGNORE")
+            )
+            result = db.session.execute(stmt)
+            total_created += result.rowcount
+
+        db.session.commit()  # persist inserts + all cursor states
 
     if total_created:
         flash(f"Distributed {total_created} images across {len(distribution)} annotators.", "success")
@@ -256,7 +278,7 @@ def distribute():
 
 
 @oa_bp.route("/deselect/<int:annotator_id>", methods=["POST"])
-@role_required("oa")
+@role_required("junior_oa")
 def deselect_annotator(annotator_id):
     count = WorkItem.query.filter_by(
         oa_id=current_user.id, annotator_id=annotator_id, status="pending"
@@ -267,7 +289,7 @@ def deselect_annotator(annotator_id):
 
 
 @oa_bp.route("/review")
-@role_required("oa")
+@role_required("junior_oa")
 def review():
     item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
     image_id = item.id if item else None
@@ -278,7 +300,7 @@ def review():
 
 
 @oa_bp.route("/review/<int:image_id>")
-@role_required("oa")
+@role_required("junior_oa")
 def review_image(image_id):
     item = WorkItem.query.filter_by(id=image_id, oa_id=current_user.id).first()
     if not item:
@@ -291,13 +313,13 @@ def review_image(image_id):
 
 
 @oa_bp.route("/grid")
-@role_required("oa")
+@role_required("junior_oa")
 def grid():
     return render_template("oa/grid.html")
 
 
 @oa_bp.route("/grid_data")
-@role_required("oa")
+@role_required("junior_oa")
 def grid_data():
     page = request.args.get("page", 1, type=int)
     status_filter = request.args.get("status", "")

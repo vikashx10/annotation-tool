@@ -4,42 +4,70 @@
 
 {% block content %}
 <div class="container">
+    <!-- Stats + action -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
         <div id="statsInfo" style="font-size:0.84rem; font-weight:500; color:#555;">Loading...</div>
         <a href="{{ url_for('annotator.annotate') }}" class="btn btn-primary">Start Annotating</a>
     </div>
 
-    <div class="progress-bar-container" style="margin-bottom:20px;">
+    <div class="progress-bar-container" style="margin-bottom:28px;">
         <div class="progress-bar-fill" id="progressBar" style="width:0%;"></div>
     </div>
 
-    <div class="image-grid" id="gridContainer">
-        <p style="color:#bbb; padding:20px;">Loading...</p>
+    <!-- Pending work section -->
+    <div style="margin-bottom:32px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <h2 style="font-size:1rem; font-weight:600; margin:0;">Pending Work</h2>
+            <span id="pendingCount" style="font-size:0.8rem; color:#888;"></span>
+        </div>
+        <div class="image-grid" id="pendingGrid">
+            <p style="color:#bbb; padding:20px;">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Completed section -->
+    <div>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <h2 style="font-size:1rem; font-weight:600; margin:0;">Submitted for Review</h2>
+            <span id="doneCount" style="font-size:0.8rem; color:#888;"></span>
+        </div>
+        <div class="image-grid" id="doneGrid">
+            <p style="color:#bbb; padding:20px;">Loading...</p>
+        </div>
     </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/grid.js') }}"></script>
 <script>
-    const grid = new ImageGrid('gridContainer', {
-        fetchUrl: '{{ url_for("annotator.grid_data") }}',
+    const BASE_URL = '{{ url_for("annotator.grid_data") }}';
+
+    const pendingGrid = new ImageGrid('pendingGrid', {
+        fetchUrl: BASE_URL + '?status=pending_work',
+        onClick: (imageId) => { window.location = `/annotator/annotate/${imageId}`; }
+    });
+
+    const doneGrid = new ImageGrid('doneGrid', {
+        fetchUrl: BASE_URL + '?status=completed',
         onClick: (imageId) => { window.location = `/annotator/annotate/${imageId}`; }
     });
 
     async function loadGrid() {
         try {
-            const resp = await fetch('{{ url_for("annotator.grid_data") }}');
+            const resp = await fetch(BASE_URL);
             const data = await resp.json();
 
             document.getElementById('statsInfo').textContent =
                 `Total: ${data.total} · Pending: ${data.pending} · Done: ${data.done}`;
+            document.getElementById('pendingCount').textContent = `(${data.pending})`;
+            document.getElementById('doneCount').textContent = `(${data.done})`;
 
             const pct = data.total > 0 ? ((data.done / data.total) * 100).toFixed(1) : 0;
-            const bar = document.getElementById('progressBar');
-            bar.style.width = pct + '%';
+            document.getElementById('progressBar').style.width = pct + '%';
 
-            grid.render(data.images, data);
+            pendingGrid.load(1);
+            doneGrid.load(1);
         } catch (e) {
-            document.getElementById('gridContainer').innerHTML =
+            document.getElementById('pendingGrid').innerHTML =
                 '<p style="padding:20px; color:#dc2626;">Failed to load images.</p>';
         }
     }

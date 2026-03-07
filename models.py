@@ -13,7 +13,7 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    role = db.Column(db.String(20), nullable=False)  # 'admin', 'oa', 'annotator'
+    role = db.Column(db.String(20), nullable=False)  # 'admin', 'junior_oa', 'senior_oa', 'annotator'
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def set_password(self, password):
@@ -32,6 +32,18 @@ class OaAnnotator(db.Model):
 
     oa = db.relationship("User", foreign_keys=[oa_id], backref="managed_annotators")
     annotator = db.relationship("User", foreign_keys=[annotator_id], backref="managed_by_oas")
+
+
+class SeniorJuniorOa(db.Model):
+    """Links a Senior OA to the Junior OAs they oversee."""
+    __tablename__ = "senior_junior_oa"
+    id = db.Column(db.Integer, primary_key=True)
+    senior_oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    junior_oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("senior_oa_id", "junior_oa_id"),)
+
+    senior = db.relationship("User", foreign_keys=[senior_oa_id])
+    junior = db.relationship("User", foreign_keys=[junior_oa_id])
 
 
 class OaCursor(db.Model):
@@ -115,7 +127,8 @@ def _seed_users_from_env():
         print("[WARNING] USER_CONFIG must be a JSON array.")
         return
 
-    valid_roles = {"admin", "oa", "annotator"}
+    valid_roles = {"admin", "junior_oa", "senior_oa", "annotator"}
+
     for entry in configs:
         username = entry.get("username", "").strip()
         password = entry.get("password", "").strip()

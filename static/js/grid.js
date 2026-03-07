@@ -28,10 +28,11 @@ class ImageGrid {
         }
 
         try {
-            const params = new URLSearchParams({ page });
-            if (this.statusFilter) params.set('status', this.statusFilter);
+            const url = new URL(this.fetchUrl, location.origin);
+            url.searchParams.set('page', page);
+            if (this.statusFilter) url.searchParams.set('status', this.statusFilter);
 
-            const resp = await fetch(`${this.fetchUrl}?${params}`);
+            const resp = await fetch(url.toString());
             const data = await resp.json();
 
             this.page = data.page;
@@ -81,6 +82,10 @@ class ImageGrid {
             </div>
         `;
         if (this.onClick) {
+            // Prefetch full image on hover so it's in browser cache before navigation
+            card.addEventListener('mouseenter', () => {
+                fetch(`/api/image/${img.id}`, { credentials: 'same-origin' });
+            }, { once: true });
             card.onclick = () => this.onClick(img.id);
         }
         return card;

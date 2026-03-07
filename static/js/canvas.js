@@ -373,6 +373,22 @@ class AnnotationCanvas {
         return this.annotations.length;
     }
 
+    loadFromCache(imageId, imgElement, annotations) {
+        /**
+         * Instant load from prefetched data — no network calls.
+         * imgElement must be a fully loaded HTMLImageElement.
+         */
+        this.currentImageId = imageId;
+        this.pendingBox = null;
+        this.annotations = JSON.parse(JSON.stringify(annotations)); // deep copy
+        this.image = imgElement;
+        this.canvas.width = imgElement.naturalWidth;
+        this.canvas.height = imgElement.naturalHeight;
+        this._fitToContainer();
+        this.draw();
+        this._notifyChanged();
+    }
+
     removeAnnotation(index) {
         if (index >= 0 && index < this.annotations.length) {
             this.annotations.splice(index, 1);

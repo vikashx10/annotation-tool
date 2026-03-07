@@ -16,14 +16,17 @@
             {% if current_user.is_authenticated %}
                 {% if current_user.role == 'admin' %}
                     <a href="{{ url_for('admin.dashboard') }}" class="{% if request.blueprint == 'admin' %}active{% endif %}">Admin</a>
-                {% elif current_user.role == 'oa' %}
+                {% elif current_user.role == 'junior_oa' %}
                     <a href="{{ url_for('oa.dashboard') }}" class="{% if request.endpoint == 'oa.dashboard' %}active{% endif %}">Dashboard</a>
                     <a href="{{ url_for('oa.grid') }}" class="{% if request.endpoint == 'oa.grid' %}active{% endif %}">Review Grid</a>
+                {% elif current_user.role == 'senior_oa' %}
+                    <a href="{{ url_for('senior_oa.dashboard') }}" class="{% if request.blueprint == 'senior_oa' %}active{% endif %}">Dashboard</a>
+                    <a href="{{ url_for('senior_oa.review') }}" class="{% if request.endpoint == 'senior_oa.review' %}active{% endif %}">Final Review</a>
                 {% elif current_user.role == 'annotator' %}
                     <a href="{{ url_for('annotator.grid') }}" class="{% if request.endpoint == 'annotator.grid' %}active{% endif %}">Grid</a>
                     <a href="{{ url_for('annotator.annotate') }}" class="{% if request.endpoint == 'annotator.annotate' %}active{% endif %}">Annotate</a>
                 {% endif %}
-                <span class="user-info">{{ current_user.username }} ({{ current_user.role }})</span>
+                <span class="user-info">{{ current_user.username }} ({{ 'Junior OA' if current_user.role == 'junior_oa' else ('Senior OA' if current_user.role == 'senior_oa' else current_user.role) }})</span>
                 <a href="{{ url_for('auth.logout') }}">Logout</a>
             {% endif %}
         </div>
