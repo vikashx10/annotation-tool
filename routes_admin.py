@@ -46,6 +46,8 @@ def dashboard():
 
     oa_stats = []
     for oa in oas:
+        if oa.role != "junior_oa":
+            continue
         cursor = OaCursor.query.filter_by(oa_id=oa.id).all()
         base = WorkItem.query.filter_by(oa_id=oa.id)
         distributed     = base.count()
@@ -72,8 +74,10 @@ def dashboard():
         if User.query.get(c.oa_id)
     }
 
+    junior_oas = [o for o in oas if o.role == "junior_oa"]
+
     return render_template("admin/dashboard.html",
-        users=users, oas=oas,
+        users=users, oas=oas, junior_oas=junior_oas,
         s3_bucket=s3_bucket,
         assigned_prefixes=assigned_prefixes,
         total_distributed=total_distributed,
@@ -102,8 +106,8 @@ def assign_oa_prefix():
         flash("AWS_S3_BUCKET is not set in environment.", "danger")
         return redirect(url_for("admin.dashboard"))
     oa = User.query.get_or_404(oa_id)
-    if oa.role not in ("junior_oa", "senior_oa"):
-        flash("Selected user is not an OA.", "danger")
+    if oa.role != "junior_oa":
+        flash("S3 prefixes can only be assigned to Junior OAs.", "danger")
         return redirect(url_for("admin.dashboard"))
 
     added, skipped = 0, 0

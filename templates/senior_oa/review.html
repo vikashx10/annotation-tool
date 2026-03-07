@@ -2,6 +2,12 @@
 {% block title %}Final Review{% endblock %}
 {% block header_title %}Senior OA Review{% endblock %}
 
+{% block head %}
+{% if image_id %}
+<link rel="preload" href="/api/image/{{ image_id }}" as="image">
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="review-layout">
 
@@ -97,6 +103,45 @@
         }).join('');
     }
 
+    // ── Prefetch cache ───────────────────────────────────────────────────────
+    const _cache = new Map();
+    const CACHE_MAX = 3;
+
+    async function _prefetch(imageId) {
+        if (!imageId || _cache.has(imageId)) return;
+        _cache.set(imageId, null);
+        try {
+            const [annResp, imgResp] = await Promise.all([
+                fetch(`/api/annotations/${imageId}`),
+                fetch(`/api/image/${imageId}`),
+            ]);
+            const annotations = await annResp.json();
+            const blob = await imgResp.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => { _cache.set(imageId, { imgElement: img, annotations, blobUrl }); resolve(); };
+                img.onerror = () => { URL.revokeObjectURL(blobUrl); _cache.delete(imageId); reject(); };
+                img.src = blobUrl;
+            });
+        } catch (e) { _cache.delete(imageId); }
+        if (_cache.size > CACHE_MAX) {
+            const oldest = _cache.keys().next().value;
+            const entry = _cache.get(oldest);
+            if (entry && entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+            _cache.delete(oldest);
+        }
+    }
+
+    async function _kickPrefetch(afterId) {
+        try {
+            const resp = await fetch(`/api/peek_next_review?current_id=${afterId}`);
+            const data = await resp.json();
+            if (data.next_image_id) _prefetch(data.next_image_id);
+        } catch (e) {}
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     async function loadImage(imageId) {
         if (!imageId) {
             document.getElementById('reviewMeta').innerHTML = '<strong>No images to review!</strong>';
@@ -104,6 +149,18 @@
             return;
         }
         currentImageId = imageId;
+
+        const cached = _cache.get(imageId);
+        if (cached) {
+            ac.loadFromCache(imageId, cached.imgElement, cached.annotations);
+            document.getElementById('reviewMeta').innerHTML =
+                `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${ac.getAnnotationCount()}`;
+            renderAnnList();
+            history.replaceState(null, '', `/senior_oa/review/${imageId}`);
+            _kickPrefetch(imageId);
+            return;
+        }
+
         try {
             await ac.loadImage(imageId);
             const count = ac.getAnnotationCount();
@@ -111,6 +168,7 @@
                 `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${count}`;
             renderAnnList();
             history.replaceState(null, '', `/senior_oa/review/${imageId}`);
+            _kickPrefetch(imageId);
         } catch (e) {
             showToast('Failed to load image', 'error');
         }

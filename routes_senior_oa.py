@@ -34,12 +34,13 @@ def dashboard():
 
     junior_stats = []
     for jr in managed_juniors:
-        junior_approved = WorkItem.query.filter_by(oa_id=jr.id, status="junior_approved").count()
+        awaiting = WorkItem.query.filter_by(oa_id=jr.id, status="junior_approved").count()
         approved = WorkItem.query.filter_by(oa_id=jr.id, status="approved").count()
         total = WorkItem.query.filter_by(oa_id=jr.id).count()
         junior_stats.append({
             "user": jr,
-            "junior_approved": junior_approved,
+            "awaiting": awaiting,
+            "junior_approved": awaiting + approved,  # total ever approved by junior
             "approved": approved,
             "total": total,
         })

@@ -10,6 +10,26 @@
         <a href="{{ url_for('annotator.annotate') }}" class="btn btn-primary">Start Annotating</a>
     </div>
 
+    <!-- Stat cards -->
+    <div class="stat-grid" style="margin-bottom:20px;">
+        <div class="stat-card">
+            <div class="label">Pending</div>
+            <div class="value muted" id="statPending">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Annotated</div>
+            <div class="value amber" id="statAnnotated">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Junior Approved</div>
+            <div class="value muted" id="statJuniorApproved">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Final Approved</div>
+            <div class="value green" id="statApproved">—</div>
+        </div>
+    </div>
+
     <div class="progress-bar-container" style="margin-bottom:28px;">
         <div class="progress-bar-fill" id="progressBar" style="width:0%;"></div>
     </div>
@@ -60,6 +80,11 @@
                 `Total: ${data.total} · Pending: ${data.pending} · Done: ${data.done}`;
             document.getElementById('pendingCount').textContent = `(${data.pending})`;
             document.getElementById('doneCount').textContent = `(${data.done})`;
+
+            document.getElementById('statPending').textContent = data.pending;
+            document.getElementById('statAnnotated').textContent = data.cnt_annotated;
+            document.getElementById('statJuniorApproved').textContent = data.cnt_junior_approved;
+            document.getElementById('statApproved').textContent = data.cnt_approved;
 
             const pct = data.total > 0 ? ((data.done / data.total) * 100).toFixed(1) : 0;
             document.getElementById('progressBar').style.width = pct + '%';

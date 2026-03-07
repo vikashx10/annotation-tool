@@ -56,10 +56,10 @@
         <form method="POST" action="{{ url_for('admin.assign_oa_prefix') }}" id="assignForm">
             <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:12px;">
                 <div class="form-group" style="margin-bottom:0;">
-                    <label>OA</label>
+                    <label>Junior OA</label>
                     <select name="oa_id" required style="width:220px;">
-                        {% for oa in oas %}
-                        <option value="{{ oa.id }}">{{ oa.username }} ({{ 'Junior OA' if oa.role == 'junior_oa' else 'Senior OA' }})</option>
+                        {% for oa in junior_oas %}
+                        <option value="{{ oa.id }}">{{ oa.username }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -251,7 +251,7 @@
                 <label>Role</label>
                 <select name="role" style="width:150px;">
                     <option value="annotator">Annotator</option>
-                    <option value="oa">Junior OA</option>
+                    <option value="junior_oa">Junior OA</option>
                     <option value="senior_oa">Senior OA</option>
                     <option value="admin">Admin</option>
                 </select>
