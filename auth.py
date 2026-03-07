@@ -87,7 +87,9 @@ def logout():
 def _redirect_by_role(role):
     if role == "admin":
         return redirect(url_for("admin.dashboard"))
-    elif role == "oa":
+    elif role == "junior_oa":
         return redirect(url_for("oa.dashboard"))
+    elif role == "senior_oa":
+        return redirect(url_for("senior_oa.dashboard"))
     else:
         return redirect(url_for("annotator.grid"))

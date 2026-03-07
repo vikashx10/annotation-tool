@@ -30,7 +30,7 @@
     </div>
     {% endif %}
 
-    {% if user.role == "oa" and cursor %}
+    {% if user.role == "junior_oa" and cursor %}
     <div class="card" style="background:#f8f9fa;">
         <h3>S3 Prefixes ({{ cursor|length }})</h3>
         <table style="width:100%;">
@@ -98,7 +98,7 @@
                     <th>Filename</th>
                     <th>S3 Key</th>
                     <th>Status</th>
-                    {% if user.role == "oa" %}<th>Annotator</th>{% endif %}
+                    {% if user.role == "junior_oa" %}<th>Annotator</th>{% endif %}
                     <th>Created</th>
                     <th>Annotated</th>
                 </tr>
@@ -111,7 +111,7 @@
                         {{ w.s3_key }}
                     </td>
                     <td><span class="badge badge-{{ w.status }}">{{ w.status }}</span></td>
-                    {% if user.role == "oa" %}
+                    {% if user.role == "junior_oa" %}
                     <td>{{ w.annotator.username if w.annotator else '—' }}</td>
                     {% endif %}
                     <td style="font-size:0.85em;">{{ w.created_at.strftime('%Y-%m-%d %H:%M') if w.created_at else '' }}</td>

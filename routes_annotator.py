@@ -21,7 +21,11 @@ def grid_data():
     status_filter = request.args.get("status", "")
 
     query = WorkItem.query.filter_by(annotator_id=current_user.id)
-    if status_filter:
+    if status_filter == "pending_work":
+        query = query.filter(WorkItem.status.in_(["pending", "rejected"]))
+    elif status_filter == "completed":
+        query = query.filter(WorkItem.status.in_(["annotated", "junior_approved", "approved"]))
+    elif status_filter:
         query = query.filter_by(status=status_filter)
 
     base = WorkItem.query.filter_by(annotator_id=current_user.id)

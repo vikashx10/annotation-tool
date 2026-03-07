@@ -15,11 +15,15 @@
             <div class="value muted">{{ total_assigned }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Under Review</div>
+            <div class="label">Annotated (Junior Review)</div>
             <div class="value amber">{{ total_under_review }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Completed</div>
+            <div class="label">Junior Approved (Senior Review)</div>
+            <div class="value muted">{{ total_junior_approved }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Final Approved</div>
             <div class="value green">{{ total_completed }}</div>
         </div>
     </div>
@@ -53,9 +57,9 @@
             <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:12px;">
                 <div class="form-group" style="margin-bottom:0;">
                     <label>OA</label>
-                    <select name="oa_id" required style="width:180px;">
+                    <select name="oa_id" required style="width:220px;">
                         {% for oa in oas %}
-                        <option value="{{ oa.id }}">{{ oa.username }}</option>
+                        <option value="{{ oa.id }}">{{ oa.username }} ({{ 'Junior OA' if oa.role == 'junior_oa' else 'Senior OA' }})</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -247,7 +251,8 @@
                 <label>Role</label>
                 <select name="role" style="width:150px;">
                     <option value="annotator">Annotator</option>
-                    <option value="oa">OA</option>
+                    <option value="oa">Junior OA</option>
+                    <option value="senior_oa">Senior OA</option>
                     <option value="admin">Admin</option>
                 </select>
             </div>
@@ -268,8 +273,8 @@
                     <th>Distributed</th>
                     <th>Pending</th>
                     <th>Annotated</th>
-                    <th>Approved</th>
-                    <th>Rejected</th>
+                    <th>Jr. Approved</th>
+                    <th>Final Approved</th>
                     <th>Annotators</th>
                     <th>Actions</th>
                 </tr>
@@ -307,8 +312,8 @@
                     <td>{{ stat.distributed }}</td>
                     <td>{{ stat.pending }}</td>
                     <td>{{ stat.annotated }}</td>
+                    <td style="color:#f59e0b; font-weight:600;">{{ stat.junior_approved }}</td>
                     <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
-                    <td style="color:#dc3545;">{{ stat.rejected }}</td>
                     <td>{{ stat.managed }}</td>
                     <td><a href="{{ url_for('admin.user_detail', user_id=stat.user.id) }}" class="btn btn-info btn-sm">Details</a></td>
                 </tr>
@@ -334,7 +339,7 @@
                 {% for user in users %}
                 <tr>
                     <td>{{ user.username }}</td>
-                    <td><span class="badge badge-{{ 'approved' if user.role == 'admin' else ('annotated' if user.role == 'oa' else 'pending') }}">{{ user.role }}</span></td>
+                    <td><span class="badge badge-{{ 'approved' if user.role == 'admin' else ('annotated' if user.role in ('junior_oa','senior_oa') else 'pending') }}">{{ 'Junior OA' if user.role == 'junior_oa' else ('Senior OA' if user.role == 'senior_oa' else user.role) }}</span></td>
                     <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}</td>
                     <td>
                         <a href="{{ url_for('admin.user_detail', user_id=user.id) }}" class="btn btn-info btn-sm">Details</a>

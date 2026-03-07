@@ -88,11 +88,15 @@
             <div class="value muted">{{ total_pending }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Awaiting Review</div>
+            <div class="label">Awaiting Junior Review</div>
             <div class="value amber">{{ total_annotated }}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Approved</div>
+            <div class="label">Junior Approved</div>
+            <div class="value muted">{{ total_junior_approved }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Final Approved</div>
             <div class="value green">{{ total_approved }}</div>
         </div>
         <div class="stat-card">
@@ -114,7 +118,7 @@
         <h3>Actions</h3>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
             {% if total_annotated > 0 %}
-            <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Review Next ({{ total_annotated }})</a>
+            <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Junior Review ({{ total_annotated }})</a>
             {% endif %}
             <a href="{{ url_for('oa.grid') }}" class="btn btn-secondary">View All Images</a>
         </div>
@@ -144,7 +148,7 @@
             </div>
 
             <!-- Equal mode -->
-            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-equal">
+            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-equal" class="distribute-form">
                 <input type="hidden" name="mode" value="equal">
                 <div style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
                     <div class="form-group" style="margin-bottom:0;">
@@ -156,12 +160,12 @@
                         × {{ annotator_stats|length }} annotators
                         = <strong>{{ annotator_stats|length }} × N</strong> images fetched from S3
                     </div>
-                    <button type="submit" class="btn-warning">Distribute to All</button>
+                    <button type="submit" class="btn-warning distribute-btn">Distribute to All</button>
                 </div>
             </form>
 
             <!-- Custom mode -->
-            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-custom" style="display:none;">
+            <form method="POST" action="{{ url_for('oa.distribute') }}" id="form-custom" class="distribute-form" style="display:none;">
                 <input type="hidden" name="mode" value="custom">
                 <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:end;">
                     {% for stat in annotator_stats %}
@@ -171,9 +175,30 @@
                                style="width:100px; text-align:center;">
                     </div>
                     {% endfor %}
-                    <button type="submit" class="btn-warning">Distribute</button>
+                    <button type="submit" class="btn-warning distribute-btn">Distribute</button>
                 </div>
             </form>
+
+            <!-- Loading overlay (shown on submit) -->
+            <div id="distributingOverlay" style="display:none; margin-top:16px; padding:14px 18px;
+                 background:#fff8e1; border:1px solid #f59e0b; border-radius:8px;
+                 display:none; align-items:center; gap:12px;">
+                <div style="width:18px; height:18px; border:3px solid #f59e0b; border-top-color:transparent;
+                     border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0;"></div>
+                <span style="font-weight:500; color:#92400e;">Distributing images… please wait</span>
+            </div>
+            <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+            <script>
+            document.querySelectorAll('.distribute-form').forEach(function(form) {
+                form.addEventListener('submit', function() {
+                    document.getElementById('distributingOverlay').style.display = 'flex';
+                    document.querySelectorAll('.distribute-btn').forEach(function(btn) {
+                        btn.disabled = true;
+                        btn.textContent = 'Distributing…';
+                    });
+                });
+            });
+            </script>
         </div>
         {% elif cursors and not cursors|selectattr('exhausted','equalto',false)|list and unassigned_to_annotator == 0 %}
         <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef; color:#6c757d; font-size:0.9em;">

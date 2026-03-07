@@ -4,7 +4,7 @@ import threading
 import zipfile
 from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, current_app
 from flask_login import current_user
-from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation
+from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation, SeniorJuniorOa
 from auth import role_required
 from s3_service import validate_bucket_access, get_object_bytes, count_s3_images
 
@@ -34,7 +34,7 @@ def _start_count_thread(app, cursor_id, bucket, prefix):
 @role_required("admin")
 def dashboard():
     users = User.query.order_by(User.role, User.username).all()
-    oas = User.query.filter_by(role="oa").all()
+    oas = User.query.filter(User.role.in_(["junior_oa", "senior_oa"])).order_by(User.role, User.username).all()
 
     s3_bucket = os.environ.get("AWS_S3_BUCKET", "").strip()
 
@@ -42,25 +42,26 @@ def dashboard():
     total_assigned = WorkItem.query.filter(WorkItem.annotator_id.isnot(None)).count()
     total_completed = WorkItem.query.filter_by(status="approved").count()
     total_under_review = WorkItem.query.filter_by(status="annotated").count()
+    total_junior_approved = WorkItem.query.filter_by(status="junior_approved").count()
 
     oa_stats = []
     for oa in oas:
         cursor = OaCursor.query.filter_by(oa_id=oa.id).all()
         base = WorkItem.query.filter_by(oa_id=oa.id)
-        distributed = base.count()
-        pending    = base.filter_by(status="pending").count()
-        annotated  = WorkItem.query.filter_by(oa_id=oa.id, status="annotated").count()
-        approved   = WorkItem.query.filter_by(oa_id=oa.id, status="approved").count()
-        rejected   = WorkItem.query.filter_by(oa_id=oa.id, status="rejected").count()
-        managed    = OaAnnotator.query.filter_by(oa_id=oa.id).count()
+        distributed     = base.count()
+        pending         = WorkItem.query.filter_by(oa_id=oa.id, status="pending").count()
+        annotated       = WorkItem.query.filter_by(oa_id=oa.id, status="annotated").count()
+        junior_approved = WorkItem.query.filter_by(oa_id=oa.id, status="junior_approved").count()
+        approved        = WorkItem.query.filter_by(oa_id=oa.id, status="approved").count()
+        managed         = OaAnnotator.query.filter_by(oa_id=oa.id).count()
         oa_stats.append({
             "user": oa,
             "cursor": cursor,
             "distributed": distributed,
             "pending": pending,
             "annotated": annotated,
+            "junior_approved": junior_approved,
             "approved": approved,
-            "rejected": rejected,
             "managed": managed,
         })
 
@@ -79,6 +80,7 @@ def dashboard():
         total_assigned=total_assigned,
         total_completed=total_completed,
         total_under_review=total_under_review,
+        total_junior_approved=total_junior_approved,
         oa_stats=oa_stats,
     )
 
@@ -100,7 +102,7 @@ def assign_oa_prefix():
         flash("AWS_S3_BUCKET is not set in environment.", "danger")
         return redirect(url_for("admin.dashboard"))
     oa = User.query.get_or_404(oa_id)
-    if oa.role != "oa":
+    if oa.role not in ("junior_oa", "senior_oa"):
         flash("Selected user is not an OA.", "danger")
         return redirect(url_for("admin.dashboard"))
 
@@ -170,7 +172,7 @@ def create_user():
         flash(f"User '{username}' already exists.", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    if role not in ("admin", "oa", "annotator"):
+    if role not in ("admin", "junior_oa", "senior_oa", "annotator"):
         flash("Invalid role.", "danger")
         return redirect(url_for("admin.dashboard"))
 
@@ -198,11 +200,11 @@ def delete_user(user_id):
         )
         OaAnnotator.query.filter_by(annotator_id=user_id).delete()
 
-    elif user.role == "oa":
-        # Preserve annotated/approved items — null oa_id so they remain for export.
+    elif user.role == "junior_oa":
+        # Preserve annotated/junior_approved/approved items — null oa_id for export.
         WorkItem.query.filter(
             WorkItem.oa_id == user_id,
-            WorkItem.status.in_(["annotated", "approved"])
+            WorkItem.status.in_(["annotated", "junior_approved", "approved"])
         ).update({"oa_id": None, "annotator_id": None}, synchronize_session=False)
 
         # Delete un-annotated items — nothing valuable to keep.
@@ -216,10 +218,18 @@ def delete_user(user_id):
         OaAnnotator.query.filter(
             (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
         ).delete()
+        SeniorJuniorOa.query.filter_by(junior_oa_id=user_id).delete()
+
+    elif user.role == "senior_oa":
+        # Just remove their senior links — junior OAs and their work are unaffected.
+        SeniorJuniorOa.query.filter_by(senior_oa_id=user_id).delete()
 
     else:  # admin — no work items owned, just clean up any OA links
         OaAnnotator.query.filter(
             (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
+        ).delete()
+        SeniorJuniorOa.query.filter(
+            (SeniorJuniorOa.senior_oa_id == user_id) | (SeniorJuniorOa.junior_oa_id == user_id)
         ).delete()
 
     db.session.delete(user)
@@ -236,7 +246,7 @@ def user_detail(user_id):
 
     if user.role == "annotator":
         work_items = WorkItem.query.filter_by(annotator_id=user_id).all()
-    elif user.role == "oa":
+    elif user.role == "junior_oa":
         work_items = WorkItem.query.filter_by(oa_id=user_id).all()
 
     total = len(work_items)
@@ -247,7 +257,7 @@ def user_detail(user_id):
     approved = sum(1 for w in work_items if w.status == "approved")
 
     managed = []
-    if user.role == "oa":
+    if user.role == "junior_oa":
         links = OaAnnotator.query.filter_by(oa_id=user_id).all()
         for link in links:
             ann_user = User.query.get(link.annotator_id)
@@ -259,7 +269,7 @@ def user_detail(user_id):
                     "done": sum(1 for w in ann_items if w.status in ("annotated", "approved")),
                 })
 
-    cursor = OaCursor.query.filter_by(oa_id=user_id).all() if user.role == "oa" else []
+    cursor = OaCursor.query.filter_by(oa_id=user_id).all() if user.role == "junior_oa" else []
 
     return render_template("admin/user_detail.html",
         user=user, assignments=work_items,

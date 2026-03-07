@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Senior OA Dashboard{% endblock %}
+{% block header_title %}Senior OA Dashboard{% endblock %}
+
+{% block content %}
+<div class="container">
+
+    <!-- Stats -->
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="label">Awaiting Final Review</div>
+            <div class="value amber">{{ to_review }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Final Approved</div>
+            <div class="value green">{{ total_approved }}</div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card">
+        <h3>Actions</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            {% if to_review > 0 %}
+            <a href="{{ url_for('senior_oa.review') }}" class="btn btn-primary">
+                Review Next ({{ to_review }})
+            </a>
+            {% endif %}
+        </div>
+        {% if not managed_juniors %}
+        <p style="margin-top:12px; color:#6c757d; font-size:0.9em;">
+            Add Junior OAs below to start reviewing their approved work.
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- Junior OA Stats -->
+    {% if junior_stats %}
+    <div class="card">
+        <h3>Junior OA Overview</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Junior OA</th>
+                    <th>Total Distributed</th>
+                    <th>Junior Approved</th>
+                    <th>Final Approved</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat in junior_stats %}
+                <tr>
+                    <td>{{ stat.user.username }}</td>
+                    <td>{{ stat.total }}</td>
+                    <td><span class="badge badge-annotated">{{ stat.junior_approved }}</span></td>
+                    <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">
+                            <button type="submit" class="btn-danger btn-sm"
+                                onclick="return confirm('Remove {{ stat.user.username }} from your managed list?');">
+                                Remove
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Manage Junior OAs -->
+    <div class="card">
+        <h3>Manage Junior OAs</h3>
+        {% if available_juniors %}
+        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}"
+              style="display:flex; gap:10px; align-items:end;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Add Junior OA</label>
+                <select name="junior_id" style="width:220px;">
+                    {% for j in available_juniors %}
+                    <option value="{{ j.id }}">{{ j.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Add</button>
+        </form>
+        {% else %}
+        <p style="color:#6c757d;">No available Junior OAs to add.</p>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
