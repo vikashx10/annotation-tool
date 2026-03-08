@@ -33,9 +33,12 @@ def _collect_keys_from_cursor(cursor, count, existing_keys):
         }
         if cursor.continuation_token:
             kwargs["ContinuationToken"] = cursor.continuation_token
+        elif cursor.last_key:
+            kwargs["StartAfter"] = cursor.last_key
 
         resp = s3.list_objects_v2(**kwargs)
 
+        hit_limit = False
         for obj in resp.get("Contents", []):
             key = obj["Key"]
             if os.path.splitext(key)[1].lower() not in IMAGE_EXTENSIONS:
@@ -46,7 +49,14 @@ def _collect_keys_from_cursor(cursor, count, existing_keys):
             cursor.last_key = key
             collected.append(key)
             if len(collected) >= count:
+                hit_limit = True
                 break
+
+        if hit_limit:
+            # Collected enough — don't mark exhausted even if this was the
+            # last S3 page. Next call will resume via StartAfter=last_key.
+            cursor.continuation_token = None
+            break
 
         if resp.get("IsTruncated"):
             cursor.continuation_token = resp["NextContinuationToken"]
