@@ -33,36 +33,38 @@ class AnnotationCanvas {
         this.startY = 0;
         this.pendingBox = null;
 
+        this.zoom = 1;
+        this.minZoom = 0.3;
+        this.maxZoom = 5;
+        this._baseWidth = 0;
+        this._baseHeight = 0;
+        this._touchMode = 'none';   // 'none' | 'draw' | 'pinch'
+        this._pinchStartDist = 0;
+        this._pinchStartZoom = 1;
+        this._lastTouchX = 0;
+        this._lastTouchY = 0;
+        this._lastPinchMid = null;
+
         this._setupEventListeners();
+        this._createZoomBadge();
     }
 
     _setupEventListeners() {
-        if (this.readOnly) return;
+        if (this.readOnly) {
+            this._setupZoomListeners();
+            return;
+        }
 
         this.canvas.addEventListener('mousedown', (e) => this._handleMouseDown(e), false);
         this.canvas.addEventListener('mousemove', (e) => this._handleMouseMove(e), false);
         this.canvas.addEventListener('mouseup', (e) => this._handleMouseUp(e), false);
 
-        this.canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            const touch = e.touches[0];
-            this.canvas.dispatchEvent(new MouseEvent('mousedown', {
-                clientX: touch.clientX, clientY: touch.clientY
-            }));
-        }, false);
+        this.canvas.addEventListener('touchstart', (e) => this._handleTouchStart(e), { passive: false });
+        this.canvas.addEventListener('touchmove', (e) => this._handleTouchMove(e), { passive: false });
+        this.canvas.addEventListener('touchend', (e) => this._handleTouchEnd(e), { passive: false });
+        this.canvas.addEventListener('touchcancel', (e) => this._handleTouchEnd(e), { passive: false });
 
-        this.canvas.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            const touch = e.touches[0];
-            this.canvas.dispatchEvent(new MouseEvent('mousemove', {
-                clientX: touch.clientX, clientY: touch.clientY
-            }));
-        }, false);
-
-        this.canvas.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            this.canvas.dispatchEvent(new MouseEvent('mouseup', {}));
-        }, false);
+        this._setupZoomListeners();
 
         const overlay = document.getElementById('overlay');
         if (overlay) {
@@ -70,9 +72,178 @@ class AnnotationCanvas {
         }
     }
 
+    _setupZoomListeners() {
+        const scroll = this.canvas.closest('.canvas-scroll');
+        if (scroll) {
+            scroll.addEventListener('wheel', (e) => this._handleWheel(e), { passive: false });
+        }
+
+        this.canvas.addEventListener('dblclick', () => this.resetZoom());
+    }
+
+    /* ── Touch handling (single-finger draw, two-finger pinch zoom) ── */
+
+    _handleTouchStart(e) {
+        if (e.touches.length >= 2) {
+            e.preventDefault();
+            this._touchMode = 'pinch';
+            this.isDrawing = false;
+            this.pendingBox = null;
+            this._pinchStartDist = this._getTouchDist(e.touches[0], e.touches[1]);
+            this._pinchStartZoom = this.zoom;
+            this._lastPinchMid = this._getTouchMid(e.touches[0], e.touches[1]);
+            return;
+        }
+        if (e.touches.length === 1 && this._touchMode !== 'pinch') {
+            e.preventDefault();
+            this._touchMode = 'draw';
+            const t = e.touches[0];
+            this._lastTouchX = t.clientX;
+            this._lastTouchY = t.clientY;
+            this._handleMouseDown({ clientX: t.clientX, clientY: t.clientY, preventDefault() {}, stopPropagation() {} });
+        }
+    }
+
+    _handleTouchMove(e) {
+        if (this._touchMode === 'pinch' && e.touches.length >= 2) {
+            e.preventDefault();
+            const dist = this._getTouchDist(e.touches[0], e.touches[1]);
+            const mid = this._getTouchMid(e.touches[0], e.touches[1]);
+
+            const raw = dist / this._pinchStartDist;
+            const dampened = 1 + (raw - 1) * 0.5;
+            const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom,
+                this._pinchStartZoom * dampened));
+            this._zoomAtPoint(newZoom, mid.x, mid.y);
+
+            if (this._lastPinchMid) {
+                const scroll = this.canvas.closest('.canvas-scroll');
+                if (scroll) {
+                    scroll.scrollLeft -= (mid.x - this._lastPinchMid.x);
+                    scroll.scrollTop -= (mid.y - this._lastPinchMid.y);
+                }
+            }
+            this._lastPinchMid = mid;
+            return;
+        }
+        if (this._touchMode === 'draw' && e.touches.length === 1) {
+            e.preventDefault();
+            const t = e.touches[0];
+            this._lastTouchX = t.clientX;
+            this._lastTouchY = t.clientY;
+            this._handleMouseMove({ clientX: t.clientX, clientY: t.clientY, preventDefault() {}, stopPropagation() {} });
+        }
+    }
+
+    _handleTouchEnd(e) {
+        if (e.touches.length === 0) {
+            if (this._touchMode === 'draw') {
+                this._handleMouseUp({ clientX: this._lastTouchX, clientY: this._lastTouchY, preventDefault() {}, stopPropagation() {} });
+            }
+            this._touchMode = 'none';
+        }
+    }
+
+    _getTouchDist(a, b) {
+        const dx = a.clientX - b.clientX;
+        const dy = a.clientY - b.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    _getTouchMid(a, b) {
+        return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+    }
+
+    /* ── Mouse wheel zoom ── */
+
+    _handleWheel(e) {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const factor = e.deltaY > 0 ? 0.97 : 1.03;
+        const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));
+        this._zoomAtPoint(newZoom, e.clientX, e.clientY);
+    }
+
+    /* ── Zoom helpers ── */
+
+    _zoomAtPoint(newZoom, screenX, screenY) {
+        const scroll = this.canvas.closest('.canvas-scroll');
+        if (!scroll || !this._baseWidth) return;
+
+        const scrollRect = scroll.getBoundingClientRect();
+        const viewX = screenX - scrollRect.left;
+        const viewY = screenY - scrollRect.top;
+        const contentX = viewX + scroll.scrollLeft;
+        const contentY = viewY + scroll.scrollTop;
+        const fracX = contentX / (this._baseWidth * this.zoom);
+        const fracY = contentY / (this._baseHeight * this.zoom);
+
+        this.zoom = newZoom;
+        this._applyZoom();
+
+        scroll.scrollLeft = fracX * this._baseWidth * this.zoom - viewX;
+        scroll.scrollTop = fracY * this._baseHeight * this.zoom - viewY;
+    }
+
+    _applyZoom() {
+        if (!this._baseWidth || !this._baseHeight) return;
+        this.canvas.style.width = Math.round(this._baseWidth * this.zoom) + 'px';
+        this.canvas.style.height = Math.round(this._baseHeight * this.zoom) + 'px';
+        this._updateZoomIndicator();
+    }
+
+    resetZoom() {
+        this.zoom = 1;
+        this._applyZoom();
+        const scroll = this.canvas.closest('.canvas-scroll');
+        if (scroll) { scroll.scrollLeft = 0; scroll.scrollTop = 0; }
+    }
+
+    _createZoomBadge() {
+        const area = this.canvas.closest('.annotate-canvas-area');
+        if (!area) return;
+
+        let toolbar = area.querySelector('.annotate-toolbar');
+        if (!toolbar) {
+            toolbar = document.createElement('div');
+            toolbar.className = 'annotate-toolbar';
+            const scroll = area.querySelector('.canvas-scroll');
+            area.insertBefore(toolbar, scroll);
+        }
+
+        const badge = document.createElement('div');
+        badge.className = 'zoom-badge';
+        badge.innerHTML = `
+            <button id="zoomOutBtn" title="Zoom out">&#x2212;</button>
+            <span id="zoomBadge">100%</span>
+            <button id="zoomInBtn" title="Zoom in">&#x2b;</button>
+            <button id="zoomResetBtn" title="Reset zoom (double-click)">&#x21ba;</button>`;
+        toolbar.appendChild(badge);
+
+        badge.querySelector('#zoomOutBtn').addEventListener('click', () => {
+            const newZoom = Math.max(this.minZoom, this.zoom * 0.8);
+            this.zoom = newZoom;
+            this._applyZoom();
+        });
+        badge.querySelector('#zoomInBtn').addEventListener('click', () => {
+            const newZoom = Math.min(this.maxZoom, this.zoom * 1.25);
+            this.zoom = newZoom;
+            this._applyZoom();
+        });
+        badge.querySelector('#zoomResetBtn').addEventListener('click', () => this.resetZoom());
+    }
+
+    _updateZoomIndicator() {
+        const badge = document.getElementById('zoomBadge');
+        if (!badge) return;
+        const pct = Math.round(this.zoom * 100);
+        badge.textContent = pct + '%';
+    }
+
     async loadImage(imageId) {
         this.currentImageId = imageId;
         this.pendingBox = null;
+        this.zoom = 1;
 
         // Fetch annotations
         try {
@@ -148,14 +319,17 @@ class AnnotationCanvas {
     _fitToContainer() {
         const scroll = this.canvas.closest('.canvas-scroll');
         if (!scroll) return;
-        const availW = scroll.clientWidth - 48;   // 24px padding each side
+        const availW = scroll.clientWidth - 48;
         const availH = scroll.clientHeight - 48;
         const imgW = this.canvas.width;
         const imgH = this.canvas.height;
         if (!availW || !availH || !imgW || !imgH) return;
         const scale = Math.min(availW / imgW, availH / imgH);
-        this.canvas.style.width  = Math.round(imgW * scale) + 'px';
-        this.canvas.style.height = Math.round(imgH * scale) + 'px';
+        this._baseWidth = Math.round(imgW * scale);
+        this._baseHeight = Math.round(imgH * scale);
+        this.canvas.style.width  = Math.round(this._baseWidth * this.zoom) + 'px';
+        this.canvas.style.height = Math.round(this._baseHeight * this.zoom) + 'px';
+        this._updateZoomIndicator();
     }
 
     toggleDrawMode() {
@@ -380,6 +554,7 @@ class AnnotationCanvas {
          */
         this.currentImageId = imageId;
         this.pendingBox = null;
+        this.zoom = 1;
         this.annotations = JSON.parse(JSON.stringify(annotations)); // deep copy
         this.image = imgElement;
         this.canvas.width = imgElement.naturalWidth;
