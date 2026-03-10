@@ -178,6 +178,20 @@
         document.getElementById('imageInfo').innerHTML = currentImageId
             ? `<strong>ID:</strong> ${currentImageId}<br><strong>Boxes:</strong> ${count}`
             : 'No image loaded';
+        if (currentImageId) fetchMeta(currentImageId);
+    }
+
+    async function fetchMeta(imageId) {
+        try {
+            const r = await fetch(`/api/image_meta/${imageId}`);
+            const m = await r.json();
+            const el = document.getElementById('imageInfo');
+            let html = `<strong>ID:</strong> ${imageId}<br><strong>Boxes:</strong> ${ac.getAnnotationCount()}`;
+            html += `<br><strong>Status:</strong> <span class="badge badge-${m.status}">${m.status}</span>`;
+            if (m.annotated_at) html += `<br><strong>Annotated:</strong> ${new Date(m.annotated_at).toLocaleString()}`;
+            if (m.reviewed_at) html += `<br><strong>Reviewed:</strong> ${new Date(m.reviewed_at).toLocaleString()}`;
+            el.innerHTML = html;
+        } catch(e) {}
     }
 
     async function loadImage(imageId) {

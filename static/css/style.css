@@ -329,6 +329,11 @@ input:focus, select:focus, textarea:focus {
     text-overflow: ellipsis;
     border-top: 1px solid #f5f5f5;
 }
+.grid-card .card-detail {
+    font-size: 0.66rem;
+    color: #999;
+    margin-top: 2px;
+}
 
 .grid-card.status-pending   { border-top: 2px solid #ddd; }
 .grid-card.status-annotated { border-top: 2px solid #f59e0b; }

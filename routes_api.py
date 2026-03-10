@@ -86,6 +86,23 @@ def serve_thumbnail(image_id):
     return _image_response(thumb_raw, thumb_key, max_age=86400)
 
 
+@api_bp.route("/image_meta/<int:image_id>")
+@login_required
+def image_meta(image_id):
+    item = WorkItem.query.get_or_404(image_id)
+    ann_name = item.annotator.username if item.annotator else None
+    oa_name = item.oa.username if item.oa else None
+    return jsonify({
+        "id": item.id,
+        "filename": item.filename,
+        "status": item.status,
+        "annotator": ann_name,
+        "oa": oa_name,
+        "annotated_at": item.annotated_at.isoformat() if item.annotated_at else None,
+        "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
+    })
+
+
 @api_bp.route("/annotations/<int:image_id>")
 @login_required
 def get_annotations(image_id):
