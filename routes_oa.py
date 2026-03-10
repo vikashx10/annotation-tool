@@ -359,7 +359,13 @@ def grid_data():
         .paginate(page=page, per_page=PAGE_SIZE, error_out=False)
 
     images = [
-        {"id": w.id, "filename": w.filename, "status": w.status, "annotator_id": w.annotator_id}
+        {
+            "id": w.id, "filename": w.filename, "status": w.status,
+            "annotator_id": w.annotator_id,
+            "annotator": w.annotator.username if w.annotator else None,
+            "annotated_at": w.annotated_at.isoformat() if w.annotated_at else None,
+            "reviewed_at": w.reviewed_at.isoformat() if w.reviewed_at else None,
+        }
         for w in paginated.items
     ]
 

@@ -74,11 +74,17 @@ class ImageGrid {
     _makeCard(img) {
         const card = document.createElement('div');
         card.className = `grid-card status-${img.status}`;
+
+        let details = '';
+        if (img.annotator) details += `<div class="card-detail">By: ${img.annotator}</div>`;
+        if (img.annotated_at) details += `<div class="card-detail">${new Date(img.annotated_at).toLocaleDateString()}</div>`;
+
         card.innerHTML = `
             <img src="/api/thumbnail/${img.id}" alt="${img.filename}" loading="lazy">
             <div class="card-info">
                 <div>${img.filename}</div>
                 <span class="badge badge-${img.status}">${img.status}</span>
+                ${details}
             </div>
         `;
         if (this.onClick) {

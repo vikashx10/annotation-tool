@@ -142,6 +142,23 @@
     }
     // ────────────────────────────────────────────────────────────────────────
 
+    async function updateMeta(imageId) {
+        const el = document.getElementById('reviewMeta');
+        const boxes = ac.getAnnotationCount();
+        el.innerHTML = `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${boxes}<br><span style="color:#aaa;">Loading info…</span>`;
+        try {
+            const r = await fetch(`/api/image_meta/${imageId}`);
+            const m = await r.json();
+            let html = `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${boxes}`;
+            if (m.annotator) html += `<br><strong>Annotator</strong> ${m.annotator}`;
+            if (m.oa) html += `<br><strong>Junior OA</strong> ${m.oa}`;
+            if (m.annotated_at) html += `<br><strong>Annotated</strong> ${new Date(m.annotated_at).toLocaleString()}`;
+            if (m.reviewed_at) html += `<br><strong>Jr. Reviewed</strong> ${new Date(m.reviewed_at).toLocaleString()}`;
+            html += `<br><strong>Status</strong> <span class="badge badge-${m.status}">${m.status}</span>`;
+            el.innerHTML = html;
+        } catch(e) {}
+    }
+
     async function loadImage(imageId) {
         if (!imageId) {
             document.getElementById('reviewMeta').innerHTML = '<strong>No images to review!</strong>';
@@ -153,21 +170,18 @@
         const cached = _cache.get(imageId);
         if (cached) {
             ac.loadFromCache(imageId, cached.imgElement, cached.annotations);
-            document.getElementById('reviewMeta').innerHTML =
-                `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${ac.getAnnotationCount()}`;
             renderAnnList();
             history.replaceState(null, '', `/senior_oa/review/${imageId}`);
+            updateMeta(imageId);
             _kickPrefetch(imageId);
             return;
         }
 
         try {
             await ac.loadImage(imageId);
-            const count = ac.getAnnotationCount();
-            document.getElementById('reviewMeta').innerHTML =
-                `<strong>ID</strong> ${imageId}<br><strong>Boxes</strong> ${count}`;
             renderAnnList();
             history.replaceState(null, '', `/senior_oa/review/${imageId}`);
+            updateMeta(imageId);
             _kickPrefetch(imageId);
         } catch (e) {
             showToast('Failed to load image', 'error');
