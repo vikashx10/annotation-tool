@@ -6,7 +6,23 @@
 <div class="container">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
         <div id="statsInfo" style="font-size:0.84rem; font-weight:500; color:#555;">Loading...</div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; align-items:center;">
+            <select id="statusFilter" onchange="grid.setStatusFilter(this.value); loadGrid();"
+                    style="padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:0.84rem;">
+                <option value="">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="annotated">Annotated</option>
+                <option value="junior_approved">Junior Approved</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+            </select>
+            <select id="annotatorFilter" onchange="grid.setAnnotatorFilter(this.value); loadGrid();"
+                    style="padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:0.84rem;">
+                <option value="">All Annotators</option>
+                {% for ann in managed_annotators %}
+                <option value="{{ ann.id }}">{{ ann.username }}</option>
+                {% endfor %}
+            </select>
             <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Review Next</a>
             <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">Dashboard</a>
         </div>
@@ -30,7 +46,10 @@
 
     async function loadGrid() {
         try {
-            const resp = await fetch('{{ url_for("oa.grid_data") }}');
+            const url = new URL('{{ url_for("oa.grid_data") }}', location.origin);
+            if (grid.statusFilter) url.searchParams.set('status', grid.statusFilter);
+            if (grid.annotatorFilter) url.searchParams.set('annotator_id', grid.annotatorFilter);
+            const resp = await fetch(url.toString());
             const data = await resp.json();
 
             document.getElementById('statsInfo').textContent =

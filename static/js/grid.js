@@ -16,6 +16,7 @@ class ImageGrid {
         this.page = 1;
         this.pages = 1;
         this.statusFilter = '';
+        this.annotatorFilter = '';
         this.loading = false;
     }
 
@@ -31,6 +32,7 @@ class ImageGrid {
             const url = new URL(this.fetchUrl, location.origin);
             url.searchParams.set('page', page);
             if (this.statusFilter) url.searchParams.set('status', this.statusFilter);
+            if (this.annotatorFilter) url.searchParams.set('annotator_id', this.annotatorFilter);
 
             const resp = await fetch(url.toString());
             const data = await resp.json();
@@ -119,6 +121,11 @@ class ImageGrid {
 
     setStatusFilter(status) {
         this.statusFilter = status;
+        this.load(1);
+    }
+
+    setAnnotatorFilter(annotatorId) {
+        this.annotatorFilter = annotatorId;
         this.load(1);
     }
 }

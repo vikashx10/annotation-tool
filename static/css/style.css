@@ -434,7 +434,8 @@ input:focus, select:focus, textarea:focus {
     border-radius: 4px;
     padding: 2px 6px;
     user-select: none;
-    margin-left: auto;
+    margin-left: 0;
+    order: 1;
 }
 .zoom-badge span {
     cursor: default;
