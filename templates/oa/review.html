@@ -48,6 +48,15 @@
 
     <!-- Canvas area -->
     <div class="annotate-canvas-area">
+        <div class="annotate-toolbar" style="display:flex; justify-content:flex-end; align-items:center; padding:4px 10px; gap:8px;">
+            <select id="annotatorFilter"
+                style="padding:4px 8px; border-radius:4px; border:1px solid #d1d5db; font-size:0.78rem; background:#fff; width:auto; max-width:150px; margin-left:auto; order:0;">
+                <option value="">All Annotators</option>
+                {% for ann in managed_annotators %}
+                <option value="{{ ann.id }}" {% if selected_annotator == ann.id %}selected{% endif %}>{{ ann.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
         <div class="canvas-scroll">
             <div class="canvas-wrapper">
                 <canvas id="annotationCanvas"></canvas>
@@ -71,6 +80,19 @@
     ];
 
     let currentImageId = {{ image_id | tojson }};
+
+    function getAnnotatorFilter() {
+        const sel = document.getElementById('annotatorFilter');
+        return sel ? sel.value : '';
+    }
+
+    document.getElementById('annotatorFilter').addEventListener('change', function() {
+        // Reload review page with the selected annotator filter
+        const val = this.value;
+        const url = new URL('/oa/review', location.origin);
+        if (val) url.searchParams.set('annotator_id', val);
+        window.location = url.toString();
+    });
 
     const ac = new AnnotationCanvas('annotationCanvas', {
         classNames: CLASS_NAMES,
@@ -136,7 +158,8 @@
 
     async function _kickPrefetch(afterId) {
         try {
-            const resp = await fetch(`/api/peek_next_review?current_id=${afterId}`);
+            const peekUrl = `/api/peek_next_review?current_id=${afterId}` + (getAnnotatorFilter() ? `&annotator_id=${getAnnotatorFilter()}` : '');
+            const resp = await fetch(peekUrl);
             const data = await resp.json();
             if (data.next_image_id) _prefetch(data.next_image_id);
         } catch (e) {}
@@ -194,7 +217,7 @@
             const resp = await fetch(`/api/review/${currentImageId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations() })
+                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations(), annotator_id: getAnnotatorFilter() || undefined })
             });
             const data = await resp.json();
             if (data.status === 'ok') {

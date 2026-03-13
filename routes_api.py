@@ -268,7 +268,11 @@ def review_image(image_id):
         item.reviewed_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        next_item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
+        next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
+        annotator_filter = data.get("annotator_id")
+        if annotator_filter:
+            next_query = next_query.filter_by(annotator_id=int(annotator_filter))
+        next_item = next_query.first()
 
     else:  # senior_oa
         from models import SeniorJuniorOa
@@ -333,11 +337,15 @@ def peek_next_review():
     item = None
 
     if current_user.role == "junior_oa":
-        item = WorkItem.query.filter(
+        q = WorkItem.query.filter(
             WorkItem.oa_id == current_user.id,
             WorkItem.status == "annotated",
             WorkItem.id != current_id,
-        ).first()
+        )
+        annotator_filter = request.args.get("annotator_id", type=int)
+        if annotator_filter:
+            q = q.filter_by(annotator_id=annotator_filter)
+        item = q.first()
 
     elif current_user.role == "senior_oa":
         from models import SeniorJuniorOa

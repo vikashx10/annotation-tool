@@ -25,6 +25,11 @@
             <a href="{{ url_for('senior_oa.review') }}" class="btn btn-primary">
                 Review Next ({{ to_review }})
             </a>
+            <button id="approveAllBtn" class="btn btn-primary"
+                style="background-color:#28a745; border-color:#28a745;"
+                onclick="startBulkApprove()">
+                Approve All ({{ to_review }})
+            </button>
             {% endif %}
         </div>
         {% if not managed_juniors %}
@@ -93,5 +98,83 @@
         {% endif %}
     </div>
 
+    <!-- Bulk Approve Progress (hidden by default) -->
+    <div id="bulkProgress" class="card" style="display:none;">
+        <h3>Bulk Approve Progress</h3>
+        <div style="background:#e5e7eb; border-radius:8px; height:24px; overflow:hidden; margin:12px 0;">
+            <div id="bulkBar" style="background:#28a745; height:100%; width:0%; transition:width 0.3s; border-radius:8px;"></div>
+        </div>
+        <p id="bulkStatus" style="font-size:0.9em; color:#555;">Starting...</p>
+    </div>
+
 </div>
+
+<script>
+function startBulkApprove() {
+    if (!confirm('Approve all {{ to_review }} items awaiting final review?')) return;
+
+    const btn = document.getElementById('approveAllBtn');
+    btn.disabled = true;
+    btn.textContent = 'Approving...';
+    btn.style.opacity = '0.6';
+
+    const progressDiv = document.getElementById('bulkProgress');
+    const bar = document.getElementById('bulkBar');
+    const status = document.getElementById('bulkStatus');
+    progressDiv.style.display = 'block';
+
+    // Use fetch + POST to initiate the SSE stream
+    fetch('{{ url_for("senior_oa.approve_all") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }).then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function read() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    // Stream ended — reload the page
+                    window.location.reload();
+                    return;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                // Parse SSE events from buffer
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop(); // keep incomplete last part
+                for (const part of parts) {
+                    const lines = part.trim().split('\n');
+                    let event = '', data = '';
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) event = line.slice(7);
+                        if (line.startsWith('data: ')) data = line.slice(6);
+                    }
+                    if (!data) continue;
+                    const parsed = JSON.parse(data);
+
+                    if (event === 'start') {
+                        status.textContent = `Approving 0 / ${parsed.total}...`;
+                    } else if (event === 'progress') {
+                        const pct = ((parsed.approved / parsed.total) * 100).toFixed(1);
+                        bar.style.width = pct + '%';
+                        status.textContent = `Approved ${parsed.approved} / ${parsed.total} (${pct}%)`;
+                    } else if (event === 'done') {
+                        bar.style.width = '100%';
+                        status.textContent = `Done! Approved ${parsed.approved} items. Reloading...`;
+                        setTimeout(() => window.location.reload(), 1000);
+                    }
+                }
+                read();
+            });
+        }
+        read();
+    }).catch(err => {
+        status.textContent = 'Error: ' + err.message;
+        btn.disabled = false;
+        btn.textContent = 'Approve All ({{ to_review }})';
+        btn.style.opacity = '1';
+    });
+}
+</script>
 {% endblock %}

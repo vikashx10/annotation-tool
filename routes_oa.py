@@ -312,11 +312,22 @@ def deselect_annotator(annotator_id):
 @oa_bp.route("/review")
 @role_required("junior_oa")
 def review():
-    item = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").first()
+    annotator_filter = request.args.get("annotator_id", type=int)
+    query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
+    if annotator_filter:
+        query = query.filter_by(annotator_id=annotator_filter)
+    item = query.first()
     image_id = item.id if item else None
+
+    links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
+    annotator_ids = [l.annotator_id for l in links]
+    managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
+
     return render_template("oa/review.html",
         image_id=image_id,
         class_names=current_app.config["CLASS_NAMES"],
+        managed_annotators=managed_annotators,
+        selected_annotator=annotator_filter,
     )
 
 
@@ -327,16 +338,26 @@ def review_image(image_id):
     if not item:
         flash("Image not assigned to you.", "danger")
         return redirect(url_for("oa.dashboard"))
+
+    links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
+    annotator_ids = [l.annotator_id for l in links]
+    managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
+
     return render_template("oa/review.html",
         image_id=image_id,
         class_names=current_app.config["CLASS_NAMES"],
+        managed_annotators=managed_annotators,
+        selected_annotator=request.args.get("annotator_id", type=int),
     )
 
 
 @oa_bp.route("/grid")
 @role_required("junior_oa")
 def grid():
-    return render_template("oa/grid.html")
+    links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
+    annotator_ids = [l.annotator_id for l in links]
+    managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
+    return render_template("oa/grid.html", managed_annotators=managed_annotators)
 
 
 @oa_bp.route("/grid_data")
@@ -344,13 +365,18 @@ def grid():
 def grid_data():
     page = request.args.get("page", 1, type=int)
     status_filter = request.args.get("status", "")
+    annotator_filter = request.args.get("annotator_id", "", type=str)
     PAGE_SIZE = 100
 
     query = WorkItem.query.filter_by(oa_id=current_user.id)
+    if annotator_filter:
+        query = query.filter_by(annotator_id=int(annotator_filter))
     if status_filter:
         query = query.filter_by(status=status_filter)
 
     base = WorkItem.query.filter_by(oa_id=current_user.id)
+    if annotator_filter:
+        base = base.filter_by(annotator_id=int(annotator_filter))
     total = base.count()
     to_review = base.filter_by(status="annotated").count()
     approved = base.filter_by(status="approved").count()
