@@ -23,6 +23,9 @@
             </button>
             <button onclick="saveOnly()">Save</button>
             <span class="divider"></span>
+            <button onclick="goPrev()" id="prevBtn">&larr; Prev</button>
+            <button onclick="goNext()" id="nextBtn">Next &rarr;</button>
+            <span class="divider"></span>
             <span id="progressInfo" style="font-size:0.78rem; color:#888;"></span>
             <div style="flex:1;"></div>
             <a href="{{ url_for('annotator.grid') }}" class="btn btn-secondary btn-sm">Grid View</a>
@@ -262,6 +265,26 @@
         }
     }
 
+    async function goNext() {
+        if (!currentImageId) return;
+        try {
+            const resp = await fetch(`/api/navigate_annotator?current_id=${currentImageId}&direction=next`);
+            const data = await resp.json();
+            if (data.image_id) await loadImage(data.image_id);
+            else showToast('No next image', 'error');
+        } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    }
+
+    async function goPrev() {
+        if (!currentImageId) return;
+        try {
+            const resp = await fetch(`/api/navigate_annotator?current_id=${currentImageId}&direction=prev`);
+            const data = await resp.json();
+            if (data.image_id) await loadImage(data.image_id);
+            else showToast('No previous image', 'error');
+        } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    }
+
     async function loadProgress() {
         try {
             const resp = await fetch('/annotator/progress');
@@ -279,6 +302,12 @@
         } else if (e.key === 's' || e.key === 'S') {
             e.preventDefault();
             await saveAndNext();
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            await goNext();
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            await goPrev();
         }
     });
 

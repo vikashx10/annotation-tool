@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from models import db, User, OaAnnotator, OaCursor, WorkItem, Config
 from auth import role_required
 from s3_service import get_s3_client
@@ -281,9 +281,9 @@ def distribute():
         # Single bulk insert — one commit for all annotators
         for i in range(0, len(rows_to_insert), _INSERT_BATCH):
             stmt = (
-                sqlite_insert(WorkItem.__table__)
+                pg_insert(WorkItem.__table__)
                 .values(rows_to_insert[i:i + _INSERT_BATCH])
-                .prefix_with("OR IGNORE")
+                .on_conflict_do_nothing(index_elements=["s3_key"])
             )
             result = db.session.execute(stmt)
             total_created += result.rowcount

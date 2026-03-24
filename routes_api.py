@@ -306,6 +306,25 @@ def review_image(image_id):
     return jsonify({"status": "done", "message": "No more images to review"})
 
 
+@api_bp.route("/navigate_annotator")
+@login_required
+def navigate_annotator():
+    """Return prev/next image IDs for the current annotator (no save)."""
+    current_id = request.args.get("current_id", type=int)
+    direction = request.args.get("direction", "next")  # "next" or "prev"
+
+    my_items = WorkItem.query.filter(
+        WorkItem.annotator_id == current_user.id,
+    ).order_by(WorkItem.id)
+
+    if direction == "next":
+        item = my_items.filter(WorkItem.id > current_id).first()
+    else:
+        item = my_items.filter(WorkItem.id < current_id).order_by(WorkItem.id.desc()).first()
+
+    return jsonify({"image_id": item.id if item else None})
+
+
 @api_bp.route("/peek_next")
 @login_required
 def peek_next():
@@ -359,6 +378,40 @@ def peek_next_review():
             ).first()
 
     return jsonify({"next_image_id": item.id if item else None})
+
+
+@api_bp.route("/navigate_review")
+@login_required
+def navigate_review():
+    """Return prev/next image ID for OA / Senior OA review pages (no save)."""
+    current_id = request.args.get("current_id", type=int)
+    direction = request.args.get("direction", "next")  # "next" or "prev"
+    annotator_filter = request.args.get("annotator_id", type=int)
+
+    q = None
+    if current_user.role == "junior_oa":
+        q = WorkItem.query.filter(WorkItem.oa_id == current_user.id)
+        if annotator_filter:
+            q = q.filter_by(annotator_id=annotator_filter)
+
+    elif current_user.role == "senior_oa":
+        from models import SeniorJuniorOa
+        links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
+        junior_ids = [l.junior_oa_id for l in links]
+        if junior_ids:
+            q = WorkItem.query.filter(WorkItem.oa_id.in_(junior_ids))
+        else:
+            return jsonify({"image_id": None})
+
+    if q is None:
+        return jsonify({"image_id": None})
+
+    if direction == "next":
+        item = q.filter(WorkItem.id > current_id).order_by(WorkItem.id).first()
+    else:
+        item = q.filter(WorkItem.id < current_id).order_by(WorkItem.id.desc()).first()
+
+    return jsonify({"image_id": item.id if item else None})
 
 
 @api_bp.route("/cursor_count/<int:cursor_id>")
