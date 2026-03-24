@@ -30,6 +30,17 @@
             Draw mode: draw boxes &nbsp;|&nbsp; Select mode: click box to remove
         </div>
 
+        <div style="display:flex; gap:6px; margin-bottom:10px;">
+            <button onclick="goPrev()" id="prevBtn"
+                style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.82rem;">
+                &larr; Prev
+            </button>
+            <button onclick="goNext()" id="nextBtn"
+                style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.82rem;">
+                Next &rarr;
+            </button>
+        </div>
+
         <button class="review-approve btn" id="approveBtn" onclick="doApprove()">
             Approve <span class="kbd">A</span>
         </button>
@@ -237,11 +248,37 @@
         }
     }
 
-    document.addEventListener('keydown', function(e) {
+    async function goNext() {
+        if (!currentImageId) return;
+        try {
+            let url = `/api/navigate_review?current_id=${currentImageId}&direction=next`;
+            if (getAnnotatorFilter()) url += `&annotator_id=${getAnnotatorFilter()}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.image_id) await loadImage(data.image_id);
+            else showToast('No next image', 'error');
+        } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    }
+
+    async function goPrev() {
+        if (!currentImageId) return;
+        try {
+            let url = `/api/navigate_review?current_id=${currentImageId}&direction=prev`;
+            if (getAnnotatorFilter()) url += `&annotator_id=${getAnnotatorFilter()}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.image_id) await loadImage(data.image_id);
+            else showToast('No previous image', 'error');
+        } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    }
+
+    document.addEventListener('keydown', async function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.key === 'a' || e.key === 'A') doApprove();
         else if (e.key === 'd' || e.key === 'D') toggleDraw();
         else if (e.key === 's' || e.key === 'S') { ac.setDrawMode(false); document.getElementById('drawBtn').style.background='#fff'; document.getElementById('drawBtn').style.color='#111'; }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); await goNext(); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); await goPrev(); }
     });
 
     loadImage(currentImageId);
