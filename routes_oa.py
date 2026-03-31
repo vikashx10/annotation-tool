@@ -94,6 +94,7 @@ def dashboard():
     ).count()
     total_approved        = WorkItem.query.filter_by(oa_id=current_user.id, status="approved").count()
     total_rejected        = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected").count()
+    total_rejected_by_senior = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected_by_senior").count()
     total_pending   = WorkItem.query.filter(
         WorkItem.oa_id == current_user.id,
         WorkItem.status == "pending",
@@ -125,6 +126,7 @@ def dashboard():
         total_junior_approved=total_junior_approved,
         total_approved=total_approved,
         total_rejected=total_rejected,
+        total_rejected_by_senior=total_rejected_by_senior,
         total_pending=total_pending,
         unassigned_to_annotator=unassigned,
     )
@@ -313,7 +315,9 @@ def deselect_annotator(annotator_id):
 @role_required("junior_oa")
 def review():
     annotator_filter = request.args.get("annotator_id", type=int)
-    query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
+    review_mode = request.args.get("review_mode", "annotated")
+    target_status = "rejected_by_senior" if review_mode == "rejected_by_senior" else "annotated"
+    query = WorkItem.query.filter_by(oa_id=current_user.id, status=target_status)
     if annotator_filter:
         query = query.filter_by(annotator_id=annotator_filter)
     item = query.first()
@@ -328,6 +332,7 @@ def review():
         class_names=current_app.config["CLASS_NAMES"],
         managed_annotators=managed_annotators,
         selected_annotator=annotator_filter,
+        review_mode=review_mode,
     )
 
 
@@ -343,11 +348,14 @@ def review_image(image_id):
     annotator_ids = [l.annotator_id for l in links]
     managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
 
+    review_mode = request.args.get("review_mode", "annotated")
+
     return render_template("oa/review.html",
         image_id=image_id,
         class_names=current_app.config["CLASS_NAMES"],
         managed_annotators=managed_annotators,
         selected_annotator=request.args.get("annotator_id", type=int),
+        review_mode=review_mode,
     )
 
 

@@ -74,7 +74,8 @@ class WorkItem(db.Model):
     filename = db.Column(db.String(255), nullable=False)
     oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)   # NULL when OA deleted
     annotator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    status = db.Column(db.String(20), default="pending")  # pending, annotated, approved, rejected
+    status = db.Column(db.String(20), default="pending")  # pending, annotated, junior_approved, approved, rejected, rejected_by_senior
+    reject_reason = db.Column(db.Text, nullable=True)     # comment from senior when sending back
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     annotated_at = db.Column(db.DateTime, nullable=True)
     reviewed_at = db.Column(db.DateTime, nullable=True)
@@ -104,7 +105,19 @@ def init_db(app):
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        _add_missing_columns()
         _seed_users_from_env()
+
+
+def _add_missing_columns():
+    """Add columns that may not exist in older databases."""
+    try:
+        db.session.execute(db.text(
+            "ALTER TABLE work_items ADD COLUMN IF NOT EXISTS reject_reason TEXT"
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _seed_users_from_env():

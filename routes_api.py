@@ -100,6 +100,7 @@ def image_meta(image_id):
         "oa": oa_name,
         "annotated_at": item.annotated_at.isoformat() if item.annotated_at else None,
         "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
+        "reject_reason": item.reject_reason,
     })
 
 
@@ -240,15 +241,16 @@ def _write_label_to_s3(item):
 def review_image(image_id):
     """
     Two-level OA review — both levels can edit annotations before approving.
-    Junior OA  (role=oa)        : annotated       → junior_approved
-    Senior OA  (role=senior_oa) : junior_approved  → approved  (+ S3 label write)
-    No rejection — OAs edit instead of rejecting.
+    Junior OA  (role=junior_oa) : annotated / rejected_by_senior → junior_approved
+    Senior OA  (role=senior_oa) : junior_approved → approved  (+ S3 label write)
+                                  junior_approved → rejected_by_senior (send back)
     """
     if current_user.role not in ("junior_oa", "senior_oa"):
         return jsonify({"status": "error", "message": "Forbidden"}), 403
 
     data = request.get_json() or {}
-    if data.get("action") != "approve":
+    action = data.get("action")
+    if action not in ("approve", "reject"):
         return jsonify({"status": "error", "message": "Invalid action"}), 400
 
     annotations = data.get("annotations", [])
@@ -260,15 +262,21 @@ def review_image(image_id):
     if current_user.role == "junior_oa":
         if item.oa_id != current_user.id:
             return jsonify({"status": "error", "message": "Not your assignment"}), 403
-        if item.status != "annotated":
-            return jsonify({"status": "error", "message": "Item is not annotated"}), 400
+        if item.status not in ("annotated", "rejected_by_senior"):
+            return jsonify({"status": "error", "message": "Item is not reviewable"}), 400
 
         _save_annotations_for_key(item.s3_key, annotations)
         item.status = "junior_approved"
+        item.reject_reason = None
         item.reviewed_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
+        # Determine which queue to pull next from based on current review mode
+        review_mode = data.get("review_mode", "annotated")
+        if review_mode == "rejected_by_senior":
+            next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected_by_senior")
+        else:
+            next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
         annotator_filter = data.get("annotator_id")
         if annotator_filter:
             next_query = next_query.filter_by(annotator_id=int(annotator_filter))
@@ -285,11 +293,18 @@ def review_image(image_id):
         if item.status != "junior_approved":
             return jsonify({"status": "error", "message": "Item is not junior_approved"}), 400
 
-        _save_annotations_for_key(item.s3_key, annotations)
-        item.status = "approved"
-        item.reviewed_at = datetime.now(timezone.utc)
-        db.session.commit()
-        _write_label_to_s3(item)
+        if action == "reject":
+            # Send back to junior QA for correction
+            item.status = "rejected_by_senior"
+            item.reject_reason = data.get("reject_reason", "")
+            item.reviewed_at = datetime.now(timezone.utc)
+            db.session.commit()
+        else:
+            _save_annotations_for_key(item.s3_key, annotations)
+            item.status = "approved"
+            item.reviewed_at = datetime.now(timezone.utc)
+            db.session.commit()
+            _write_label_to_s3(item)
 
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
@@ -356,9 +371,11 @@ def peek_next_review():
     item = None
 
     if current_user.role == "junior_oa":
+        review_mode = request.args.get("review_mode", "annotated")
+        target_status = "rejected_by_senior" if review_mode == "rejected_by_senior" else "annotated"
         q = WorkItem.query.filter(
             WorkItem.oa_id == current_user.id,
-            WorkItem.status == "annotated",
+            WorkItem.status == target_status,
             WorkItem.id != current_id,
         )
         annotator_filter = request.args.get("annotator_id", type=int)

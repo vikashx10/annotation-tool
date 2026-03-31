@@ -34,17 +34,26 @@ def dashboard():
         ).count()
         if junior_ids else 0
     )
+    total_sent_back = (
+        WorkItem.query.filter(
+            WorkItem.oa_id.in_(junior_ids),
+            WorkItem.status == "rejected_by_senior"
+        ).count()
+        if junior_ids else 0
+    )
 
     junior_stats = []
     for jr in managed_juniors:
         awaiting = WorkItem.query.filter_by(oa_id=jr.id, status="junior_approved").count()
         approved = WorkItem.query.filter_by(oa_id=jr.id, status="approved").count()
+        sent_back = WorkItem.query.filter_by(oa_id=jr.id, status="rejected_by_senior").count()
         total = WorkItem.query.filter_by(oa_id=jr.id).count()
         junior_stats.append({
             "user": jr,
             "awaiting": awaiting,
-            "junior_approved": awaiting + approved,  # total ever approved by junior
+            "junior_approved": awaiting + approved,
             "approved": approved,
+            "sent_back": sent_back,
             "total": total,
         })
 
@@ -54,6 +63,7 @@ def dashboard():
         junior_stats=junior_stats,
         to_review=to_review,
         total_approved=total_approved,
+        total_sent_back=total_sent_back,
     )
 
 

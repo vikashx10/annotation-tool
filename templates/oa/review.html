@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Review{% endblock %}
-{% block header_title %}Junior OA Review{% endblock %}
+{% block title %}{% if review_mode == 'rejected_by_senior' %}Fix Sent Back{% else %}Review{% endif %}{% endblock %}
+{% block header_title %}{% if review_mode == 'rejected_by_senior' %}Fix Sent Back Items{% else %}Junior OA Review{% endif %}{% endblock %}
 
 {% block head %}
 {% if image_id %}
@@ -27,7 +27,7 @@
             </button>
         </div>
         <div style="font-size:0.72rem; color:#888; margin-bottom:10px;">
-            Draw mode: draw boxes &nbsp;|&nbsp; Select mode: click box to remove
+            Draw mode: draw boxes &nbsp;|&nbsp; Select mode: click box to relabel or remove
         </div>
 
         <div style="display:flex; gap:6px; margin-bottom:10px;">
@@ -91,6 +91,7 @@
     ];
 
     let currentImageId = {{ image_id | tojson }};
+    const reviewMode = {{ (review_mode or 'annotated') | tojson }};
 
     function getAnnotatorFilter() {
         const sel = document.getElementById('annotatorFilter');
@@ -131,7 +132,7 @@
             const name = CLASS_NAMES[a.class_id] || `Class ${a.class_id}`;
             return `<div class="ann-item">
                 <span class="ann-color" style="background:${color};"></span>
-                <span class="ann-label">${i + 1}. ${name}</span>
+                <span class="ann-label" onclick="ac._showRelabelSelector(${i})" style="cursor:pointer;" title="Click to change label">${i + 1}. ${name}</span>
                 <span onclick="ac.removeAnnotation(${i})" style="margin-left:auto; cursor:pointer; color:#dc3545; font-size:0.9em;">&#x2715;</span>
             </div>`;
         }).join('');
@@ -169,7 +170,7 @@
 
     async function _kickPrefetch(afterId) {
         try {
-            const peekUrl = `/api/peek_next_review?current_id=${afterId}` + (getAnnotatorFilter() ? `&annotator_id=${getAnnotatorFilter()}` : '');
+            const peekUrl = `/api/peek_next_review?current_id=${afterId}&review_mode=${reviewMode}` + (getAnnotatorFilter() ? `&annotator_id=${getAnnotatorFilter()}` : '');
             const resp = await fetch(peekUrl);
             const data = await resp.json();
             if (data.next_image_id) _prefetch(data.next_image_id);
@@ -188,6 +189,7 @@
             if (m.annotator) html += `<br><strong>Annotator</strong> ${m.annotator}`;
             if (m.annotated_at) html += `<br><strong>Annotated</strong> ${new Date(m.annotated_at).toLocaleString()}`;
             html += `<br><strong>Status</strong> <span class="badge badge-${m.status}">${m.status}</span>`;
+            if (m.reject_reason) html += `<br><div style="margin-top:6px; padding:8px 10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px;"><strong style="color:#dc3545; font-size:0.8em;">Senior Comment:</strong><br><span style="font-size:0.85em;">${m.reject_reason}</span></div>`;
             el.innerHTML = html;
         } catch(e) {}
     }
@@ -228,7 +230,7 @@
             const resp = await fetch(`/api/review/${currentImageId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations(), annotator_id: getAnnotatorFilter() || undefined })
+                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations(), annotator_id: getAnnotatorFilter() || undefined, review_mode: reviewMode })
             });
             const data = await resp.json();
             if (data.status === 'ok') {

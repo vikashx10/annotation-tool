@@ -27,7 +27,7 @@
             </button>
         </div>
         <div style="font-size:0.72rem; color:#888; margin-bottom:10px;">
-            Draw mode: draw boxes &nbsp;|&nbsp; Select mode: click box to remove
+            Draw mode: draw boxes &nbsp;|&nbsp; Select mode: click box to relabel or remove
         </div>
 
         <div style="display:flex; gap:6px; margin-bottom:10px;">
@@ -44,6 +44,24 @@
         <button class="review-approve btn" id="approveBtn" onclick="doApprove()">
             Final Approve <span class="kbd">A</span>
         </button>
+        <button class="btn" id="rejectBtn" onclick="doReject()"
+            style="width:100%; margin-top:6px; background:#dc3545; color:#fff; border:1px solid #dc3545; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:600;">
+            Send Back to Junior <span class="kbd">R</span>
+        </button>
+
+        <!-- Send-back comment modal -->
+        <div id="rejectModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000;">
+            <div style="background:#fff; border-radius:12px; padding:24px; max-width:420px; width:90%; margin:auto; position:relative; top:50%; transform:translateY(-50%);">
+                <h3 style="margin:0 0 12px;">Send Back to Junior QA</h3>
+                <p style="font-size:0.85em; color:#666; margin-bottom:12px;">Add a comment so the Junior QA knows what to fix.</p>
+                <textarea id="rejectReason" rows="3" placeholder="e.g. Wrong label on header, missing table annotation..."
+                    style="width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:0.9em; resize:vertical; box-sizing:border-box;"></textarea>
+                <div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end;">
+                    <button onclick="closeRejectModal()" class="btn btn-secondary" style="padding:6px 16px;">Cancel</button>
+                    <button onclick="confirmReject()" class="btn" style="padding:6px 16px; background:#dc3545; color:#fff; border:1px solid #dc3545; border-radius:6px; cursor:pointer; font-weight:600;">Send Back</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Annotation list -->
         <div style="border-top:1px solid var(--border); padding-top:10px; flex:1; overflow-y:auto; min-height:0; margin-top:10px;">
@@ -108,7 +126,7 @@
             const name = CLASS_NAMES[a.class_id] || `Class ${a.class_id}`;
             return `<div class="ann-item">
                 <span class="ann-color" style="background:${color};"></span>
-                <span class="ann-label">${i + 1}. ${name}</span>
+                <span class="ann-label" onclick="ac._showRelabelSelector(${i})" style="cursor:pointer;" title="Click to change label">${i + 1}. ${name}</span>
                 <span onclick="ac.removeAnnotation(${i})" style="margin-left:auto; cursor:pointer; color:#dc3545; font-size:0.9em;">&#x2715;</span>
             </div>`;
         }).join('');
@@ -246,9 +264,50 @@
         } catch (e) { showToast('Error: ' + e.message, 'error'); }
     }
 
+    function doReject() {
+        if (!currentImageId) return;
+        document.getElementById('rejectModal').style.display = 'block';
+        document.getElementById('rejectReason').value = '';
+        setTimeout(() => document.getElementById('rejectReason').focus(), 100);
+    }
+
+    function closeRejectModal() {
+        document.getElementById('rejectModal').style.display = 'none';
+    }
+
+    async function confirmReject() {
+        if (!currentImageId) return;
+        const reason = document.getElementById('rejectReason').value.trim();
+        closeRejectModal();
+        document.getElementById('rejectBtn').disabled = true;
+        try {
+            const resp = await fetch(`/api/review/${currentImageId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'reject', reject_reason: reason, annotations: ac.getAnnotations() })
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                showToast('Sent back to Junior QA!', 'success');
+                await loadImage(data.next_image_id);
+            } else if (data.status === 'done') {
+                showToast('Sent back! No more images to review.', 'success');
+                document.getElementById('reviewMeta').innerHTML = '<strong>All reviewed!</strong>';
+                currentImageId = null;
+            } else {
+                showToast(data.message || 'Error', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        } finally {
+            if (currentImageId) document.getElementById('rejectBtn').disabled = false;
+        }
+    }
+
     document.addEventListener('keydown', async function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.key === 'a' || e.key === 'A') doApprove();
+        else if (e.key === 'r' || e.key === 'R') doReject();
         else if (e.key === 'd' || e.key === 'D') toggleDraw();
         else if (e.key === 's' || e.key === 'S') { ac.setDrawMode(false); document.getElementById('drawBtn').style.background='#fff'; document.getElementById('drawBtn').style.color='#111'; }
         else if (e.key === 'ArrowRight') { e.preventDefault(); await goNext(); }
