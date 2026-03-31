@@ -363,11 +363,10 @@ class AnnotationCanvas {
         if (canvasX < 0 || canvasX > this.canvas.width || canvasY < 0 || canvasY > this.canvas.height) return;
 
         if (!this.drawMode) {
-            // Click to remove box
+            // Click to select box — show options (change label or remove)
             const normalizedX = canvasX / this.canvas.width;
             const normalizedY = canvasY / this.canvas.height;
 
-            let boxRemoved = false;
             for (let i = this.annotations.length - 1; i >= 0; i--) {
                 const ann = this.annotations[i];
                 const boxX = ann.x_center - ann.width / 2;
@@ -377,15 +376,10 @@ class AnnotationCanvas {
 
                 if (normalizedX >= boxX && normalizedX <= boxX2 &&
                     normalizedY >= boxY && normalizedY <= boxY2) {
-                    this.annotations.splice(i, 1);
-                    boxRemoved = true;
+                    this._selectedAnnotationIndex = i;
+                    this._showRelabelSelector(i);
                     break;
                 }
-            }
-
-            if (boxRemoved) {
-                this.draw();
-                this._notifyChanged();
             }
         } else {
             this.pendingBox = null;
@@ -468,6 +462,65 @@ class AnnotationCanvas {
         document.getElementById('classSelector').classList.add('show');
     }
 
+    _showRelabelSelector(annotationIndex) {
+        const buttonsDiv = document.getElementById('classButtons');
+        if (!buttonsDiv) return;
+        buttonsDiv.innerHTML = '';
+
+        const currentClassId = this.annotations[annotationIndex].class_id;
+        const currentName = this.classNames[currentClassId] || `Class ${currentClassId}`;
+
+        // Header showing current label
+        const header = document.createElement('div');
+        header.style.cssText = 'width:100%; text-align:center; font-size:0.85rem; color:#666; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #e5e7eb;';
+        header.innerHTML = `Current: <strong style="color:${this.classColors[currentClassId]}">${currentName}</strong>`;
+        buttonsDiv.appendChild(header);
+
+        // Class buttons for relabeling
+        this.classNames.forEach((name, idx) => {
+            const btn = document.createElement('button');
+            btn.className = 'class-btn';
+            btn.textContent = `${idx}: ${name}`;
+            btn.style.borderColor = this.classColors[idx];
+            btn.style.color = this.classColors[idx];
+            if (idx === currentClassId) {
+                btn.style.background = this.classColors[idx];
+                btn.style.color = '#fff';
+            }
+            btn.onclick = () => this._relabelAnnotation(annotationIndex, idx);
+            buttonsDiv.appendChild(btn);
+        });
+
+        // Delete button
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'class-btn';
+        deleteBtn.textContent = 'Delete This Box';
+        deleteBtn.style.cssText = 'border-color:#dc3545; color:#dc3545; font-weight:700; margin-top:8px; width:100%;';
+        deleteBtn.onclick = () => {
+            this.annotations.splice(annotationIndex, 1);
+            document.getElementById('overlay').classList.remove('show');
+            document.getElementById('classSelector').classList.remove('show');
+            this._selectedAnnotationIndex = null;
+            this.draw();
+            this._notifyChanged();
+        };
+        buttonsDiv.appendChild(deleteBtn);
+
+        document.getElementById('overlay').classList.add('show');
+        document.getElementById('classSelector').classList.add('show');
+    }
+
+    _relabelAnnotation(index, newClassId) {
+        if (index >= 0 && index < this.annotations.length) {
+            this.annotations[index].class_id = newClassId;
+        }
+        this._selectedAnnotationIndex = null;
+        document.getElementById('overlay').classList.remove('show');
+        document.getElementById('classSelector').classList.remove('show');
+        this.draw();
+        this._notifyChanged();
+    }
+
     selectClass(classId) {
         if (this.pendingBox) {
             this.annotations.push({
@@ -487,6 +540,7 @@ class AnnotationCanvas {
 
     cancelDrawing() {
         this.pendingBox = null;
+        this._selectedAnnotationIndex = null;
         document.getElementById('overlay').classList.remove('show');
         document.getElementById('classSelector').classList.remove('show');
         this.draw();

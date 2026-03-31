@@ -11,6 +11,13 @@
             <div class="label">Awaiting Final Review</div>
             <div class="value amber">{{ to_review }}</div>
         </div>
+        {% if total_sent_back > 0 %}
+        <div class="stat-card" style="border-color:#dc3545;">
+            <div class="label">Sent Back to Junior</div>
+            <div class="value" style="color:#dc3545;">{{ total_sent_back }}</div>
+            <div style="font-size:0.72rem; color:#888; margin-top:4px;">awaiting junior correction</div>
+        </div>
+        {% endif %}
         <div class="stat-card">
             <div class="label">Final Approved</div>
             <div class="value green">{{ total_approved }}</div>
@@ -50,6 +57,7 @@
                     <th>Total Distributed</th>
                     <th>Junior Approved</th>
                     <th>Awaiting Final Review</th>
+                    <th>Sent Back</th>
                     <th>Final Approved</th>
                     <th>Actions</th>
                 </tr>
@@ -61,6 +69,7 @@
                     <td>{{ stat.total }}</td>
                     <td style="font-weight:600;">{{ stat.junior_approved }}</td>
                     <td><span class="badge badge-annotated">{{ stat.awaiting }}</span></td>
+                    <td>{% if stat.sent_back > 0 %}<span style="color:#dc3545; font-weight:600;">{{ stat.sent_back }}</span>{% else %}-{% endif %}</td>
                     <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
                     <td>
                         <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">

@@ -170,7 +170,7 @@
         list.innerHTML = anns.map((a, i) => `
             <div class="ann-item">
                 <span class="ann-color" style="background:${CLASS_COLORS[a.class_id % CLASS_COLORS.length]};"></span>
-                <span class="ann-label">${CLASS_NAMES[a.class_id] || 'Class ' + a.class_id}</span>
+                <span class="ann-label" onclick="ac._showRelabelSelector(${i})" style="cursor:pointer;" title="Click to change label">${CLASS_NAMES[a.class_id] || 'Class ' + a.class_id}</span>
                 <button class="ann-remove" onclick="ac.removeAnnotation(${i})" title="Remove">&times;</button>
             </div>
         `).join('');
