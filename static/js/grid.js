@@ -82,7 +82,7 @@ class ImageGrid {
         if (img.annotated_at) details += `<div class="card-detail">${new Date(img.annotated_at).toLocaleDateString()}</div>`;
 
         const preTag = img.pre_annotated
-            ? `<span style="background:#fffbeb;color:#b45309;padding:1px 6px;border-radius:3px;font-size:0.7em;font-weight:600;border:1px solid #fde68a;">VGT</span> `
+            ? `<span style="background:#fffbeb;color:#b45309;padding:1px 6px;border-radius:3px;font-size:0.7em;font-weight:600;border:1px solid #fde68a;">Auto</span> `
             : '';
 
         card.innerHTML = `

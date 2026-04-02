@@ -184,7 +184,7 @@
             ? `<strong>ID:</strong> ${currentImageId}<br><strong>Boxes:</strong> ${count}`
             : 'No image loaded';
         if (ac.annotationSource === 'pre_annotation') {
-            html += `<br><span style="background:#fffbeb; color:#b45309; padding:2px 8px; border-radius:4px; font-size:0.78em; font-weight:600; border:1px solid #fde68a;">VGT Pre-annotated</span>`;
+            html += `<br><span style="background:#fffbeb; color:#b45309; padding:2px 8px; border-radius:4px; font-size:0.78em; font-weight:600; border:1px solid #fde68a;">Auto Pre-annotated</span>`;
         }
         document.getElementById('imageInfo').innerHTML = html;
         if (currentImageId) fetchMeta(currentImageId);

@@ -334,7 +334,7 @@
                                     Pre-Annotate ({{ "{:,}".format(remaining) }})
                                 </button>
                                 {% elif total_imgs > 0 and remaining <= 0 %}
-                                <span style="font-size:0.78em; color:#28a745;">VGT done ({{ "{:,}".format(stat.pre_annotated) }})</span>
+                                <span style="font-size:0.78em; color:#28a745;">Auto done ({{ "{:,}".format(stat.pre_annotated) }})</span>
                                 {% else %}
                                 <button id="preAnnotateBtn-{{ stat.user.id }}" class="btn-warning btn-sm"
                                     disabled style="opacity:0.5; cursor:not-allowed;"
@@ -398,7 +398,7 @@
 
 <!-- Pre-Annotate Progress (hidden by default) -->
 <div id="preAnnotateProgress" class="card" style="display:none;">
-    <h3>VGT Pre-Annotation Progress</h3>
+    <h3>Auto Pre-Annotation Progress</h3>
     <div style="background:#e5e7eb; border-radius:8px; height:24px; overflow:hidden; margin:12px 0;">
         <div id="preAnnotateBar" style="background:#f59e0b; height:100%; width:0%; transition:width 0.3s; border-radius:8px;"></div>
     </div>
@@ -444,7 +444,7 @@ function stopPreAnnotate(oaId) {
 }
 
 function startPreAnnotate(oaId, oaName, count) {
-    if (!confirm(`Run VGT pre-annotation on ${count.toLocaleString()} images for ${oaName}?\n\nThis may take a while. You can close this page — it runs in the background.`)) return;
+    if (!confirm(`Run auto pre-annotation on ${count.toLocaleString()} images for ${oaName}?\n\nThis may take a while. You can close this page — it runs in the background.`)) return;
 
     const btn = document.getElementById('preAnnotateBtn-' + oaId);
     _setBtnRunning(btn);
