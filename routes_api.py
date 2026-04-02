@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request, redirect, Response
 from flask_login import login_required, current_user
 from PIL import Image
-from models import db, WorkItem, Annotation
+from models import db, WorkItem, Annotation, PreAnnotation
 from auth import role_required
 from s3_service import generate_presigned_url, get_object_bytes, put_object, object_exists, list_s3_folders
 
@@ -109,13 +109,35 @@ def image_meta(image_id):
 def get_annotations(image_id):
     item = WorkItem.query.get_or_404(image_id)
     anns = Annotation.query.filter_by(s3_key=item.s3_key).all()
-    return jsonify([{
-        "class_id": a.class_id,
-        "x_center": a.x_center,
-        "y_center": a.y_center,
-        "width": a.width,
-        "height": a.height,
-    } for a in anns])
+
+    # If no manual annotations exist and item is pending, fall back to pre-annotations
+    if not anns and item.status in ("pending", "rejected"):
+        pre_anns = PreAnnotation.query.filter(
+            PreAnnotation.s3_key == item.s3_key,
+            PreAnnotation.class_id >= 0,
+        ).all()
+        if pre_anns:
+            return jsonify({
+                "annotations": [{
+                    "class_id": a.class_id,
+                    "x_center": a.x_center,
+                    "y_center": a.y_center,
+                    "width": a.width,
+                    "height": a.height,
+                } for a in pre_anns],
+                "source": "pre_annotation",
+            })
+
+    return jsonify({
+        "annotations": [{
+            "class_id": a.class_id,
+            "x_center": a.x_center,
+            "y_center": a.y_center,
+            "width": a.width,
+            "height": a.height,
+        } for a in anns],
+        "source": "annotation",
+    })
 
 
 @api_bp.route("/annotations/<int:image_id>", methods=["POST"])

@@ -150,7 +150,8 @@
                 fetch(`/api/annotations/${imageId}`),
                 fetch(`/api/image/${imageId}`),
             ]);
-            const annotations = await annResp.json();
+            const annData = await annResp.json();
+            const annotations = Array.isArray(annData) ? annData : (annData.annotations || []);
             const blob = await imgResp.blob();
             const blobUrl = URL.createObjectURL(blob);
             await new Promise((resolve, reject) => {

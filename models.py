@@ -95,6 +95,21 @@ class Annotation(db.Model):
     height = db.Column(db.Float, nullable=False)
 
 
+class PreAnnotation(db.Model):
+    """VGT model predictions stored as pre-annotations.
+    Loaded as starting annotations when annotator opens an image with no manual annotations.
+    """
+    __tablename__ = "pre_annotations"
+    id = db.Column(db.Integer, primary_key=True)
+    s3_key = db.Column(db.String(500), nullable=False, index=True)
+    class_id = db.Column(db.Integer, nullable=False)
+    x_center = db.Column(db.Float, nullable=False)
+    y_center = db.Column(db.Float, nullable=False)
+    width = db.Column(db.Float, nullable=False)
+    height = db.Column(db.Float, nullable=False)
+    confidence = db.Column(db.Float, nullable=True)
+
+
 class Config(db.Model):
     __tablename__ = "config"
     key = db.Column(db.String(100), primary_key=True)
