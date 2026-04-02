@@ -248,9 +248,18 @@ class AnnotationCanvas {
         // Fetch annotations
         try {
             const resp = await fetch(this.getAnnotationsUrl(imageId));
-            this.annotations = await resp.json();
+            const data = await resp.json();
+            // Support both old format (array) and new format ({annotations, source})
+            if (Array.isArray(data)) {
+                this.annotations = data;
+                this.annotationSource = 'annotation';
+            } else {
+                this.annotations = data.annotations || [];
+                this.annotationSource = data.source || 'annotation';
+            }
         } catch (e) {
             this.annotations = [];
+            this.annotationSource = 'annotation';
         }
 
         // Load image

@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, jsonify, request, current_app
 from flask_login import current_user
-from models import db, WorkItem
+from models import db, WorkItem, PreAnnotation
 from auth import role_required
 
 annotator_bp = Blueprint("annotator", __name__, url_prefix="/annotator")
@@ -39,11 +39,21 @@ def grid_data():
     paginated = query.order_by(WorkItem.status.desc(), WorkItem.id)\
         .paginate(page=page, per_page=PAGE_SIZE, error_out=False)
 
+    # Check which images have pre-annotations
+    page_keys = [w.s3_key for w in paginated.items]
+    pre_annotated_keys = set()
+    if page_keys:
+        pre_annotated_keys = set(
+            r[0] for r in db.session.query(db.distinct(PreAnnotation.s3_key))
+            .filter(PreAnnotation.s3_key.in_(page_keys)).all()
+        )
+
     images = [
         {
             "id": w.id, "filename": w.filename, "status": w.status,
             "annotated_at": w.annotated_at.isoformat() if w.annotated_at else None,
             "reviewed_at": w.reviewed_at.isoformat() if w.reviewed_at else None,
+            "pre_annotated": w.s3_key in pre_annotated_keys,
         }
         for w in paginated.items
     ]

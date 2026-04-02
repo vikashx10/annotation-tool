@@ -81,11 +81,15 @@ class ImageGrid {
         if (img.annotator) details += `<div class="card-detail">By: ${img.annotator}</div>`;
         if (img.annotated_at) details += `<div class="card-detail">${new Date(img.annotated_at).toLocaleDateString()}</div>`;
 
+        const preTag = img.pre_annotated
+            ? `<span style="background:#fffbeb;color:#b45309;padding:1px 6px;border-radius:3px;font-size:0.7em;font-weight:600;border:1px solid #fde68a;">VGT</span> `
+            : '';
+
         card.innerHTML = `
             <img src="/api/thumbnail/${img.id}" alt="${img.filename}" loading="lazy">
             <div class="card-info">
                 <div>${img.filename}</div>
-                <span class="badge badge-${img.status}">${img.status}</span>
+                ${preTag}<span class="badge badge-${img.status}">${img.status}</span>
                 ${details}
             </div>
         `;

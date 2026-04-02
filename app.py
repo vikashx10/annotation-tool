@@ -1,9 +1,12 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from flask import Flask, redirect, url_for
 from flask_login import current_user
 from models import db, init_db
 from auth import auth_bp, login_manager
+
+load_dotenv()
 
 # Layout classes (12 total)
 CLASS_NAMES = [
@@ -51,8 +54,13 @@ def _migrate_db(app):
 def create_app():
     app = Flask(__name__)
     app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
+    # SQLite fallback: ensure instance/ directory exists
+    instance_dir = BASE_DIR / "instance"
+    instance_dir.mkdir(exist_ok=True)
+
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-        "DATABASE_URL", f"sqlite:///{BASE_DIR / 'instance' / 'annotations.db'}"
+        "DATABASE_URL", f"sqlite:///{instance_dir / 'annotations.db'}"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {

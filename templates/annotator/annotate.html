@@ -102,16 +102,18 @@
             // Fetch annotations and image bytes in parallel
             const [annResp, imgResp] = await Promise.all([
                 fetch(`/api/annotations/${imageId}`),
-                fetch(`/api/image/${imageId}`),   // follows presigned-URL redirect
+                fetch(`/api/image/${imageId}`),
             ]);
-            const annotations = await annResp.json();
+            const annData = await annResp.json();
+            const annotations = Array.isArray(annData) ? annData : (annData.annotations || []);
+            const annSource = (annData && annData.source) || 'annotation';
             const blob = await imgResp.blob();
             const blobUrl = URL.createObjectURL(blob);
 
             await new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onload = () => {
-                    _cache.set(imageId, { imgElement: img, annotations, blobUrl });
+                    _cache.set(imageId, { imgElement: img, annotations, annSource, blobUrl });
                     resolve();
                 };
                 img.onerror = () => {
@@ -178,9 +180,13 @@
 
     function updateInfo() {
         const count = ac.getAnnotationCount();
-        document.getElementById('imageInfo').innerHTML = currentImageId
+        let html = currentImageId
             ? `<strong>ID:</strong> ${currentImageId}<br><strong>Boxes:</strong> ${count}`
             : 'No image loaded';
+        if (ac.annotationSource === 'pre_annotation') {
+            html += `<br><span style="background:#fffbeb; color:#b45309; padding:2px 8px; border-radius:4px; font-size:0.78em; font-weight:600; border:1px solid #fde68a;">VGT Pre-annotated</span>`;
+        }
+        document.getElementById('imageInfo').innerHTML = html;
         if (currentImageId) fetchMeta(currentImageId);
     }
 
@@ -209,6 +215,7 @@
         if (cached) {
             // Instant render from prefetch cache — no network wait
             ac.loadFromCache(imageId, cached.imgElement, cached.annotations);
+            ac.annotationSource = cached.annSource || 'annotation';
             updateInfo();
             renderAnnList();
             history.replaceState(null, '', `/annotator/annotate/${imageId}`);

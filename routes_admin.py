@@ -2,9 +2,9 @@ import io
 import os
 import threading
 import zipfile
-from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, current_app, jsonify
 from flask_login import current_user
-from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation, SeniorJuniorOa
+from models import db, User, OaAnnotator, OaCursor, WorkItem, Annotation, SeniorJuniorOa, PreAnnotation
 from auth import role_required
 from s3_service import validate_bucket_access, get_object_bytes, count_s3_images
 
@@ -56,6 +56,19 @@ def dashboard():
         junior_approved = WorkItem.query.filter_by(oa_id=oa.id, status="junior_approved").count()
         approved        = WorkItem.query.filter_by(oa_id=oa.id, status="approved").count()
         managed         = OaAnnotator.query.filter_by(oa_id=oa.id).count()
+
+        # Count how many S3 keys under this OA's prefixes already have pre-annotations
+        pre_annotated = 0
+        total_cursor_images = 0
+        for c in cursor:
+            if c.total_images:
+                total_cursor_images += c.total_images
+            if c.prefix:
+                cnt = db.session.query(db.func.count(db.distinct(PreAnnotation.s3_key))).filter(
+                    PreAnnotation.s3_key.like(f"{c.prefix}%")
+                ).scalar() or 0
+                pre_annotated += cnt
+
         oa_stats.append({
             "user": oa,
             "cursor": cursor,
@@ -65,6 +78,8 @@ def dashboard():
             "junior_approved": junior_approved,
             "approved": approved,
             "managed": managed,
+            "pre_annotated": pre_annotated,
+            "total_cursor_images": total_cursor_images,
         })
 
     # Build a set of already-assigned prefixes for the UI to mark as taken
@@ -86,6 +101,7 @@ def dashboard():
         total_under_review=total_under_review,
         total_junior_approved=total_junior_approved,
         oa_stats=oa_stats,
+        pre_annotate_jobs=_pre_annotate_jobs,
     )
 
 
@@ -317,3 +333,155 @@ def export_yolo():
 
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="yolo_export.zip")
+
+
+# ── Background pre-annotation jobs ──────────────────────────────────────
+# In-memory progress tracker. Keyed by oa_id.
+# Each entry: {"status": "running"|"done"|"error", "processed": N, "total": N,
+#              "success": N, "failed": N, "total_boxes": N}
+_pre_annotate_jobs = {}
+
+
+def _run_pre_annotate(app, oa_id, bucket, prefixes):
+    """Background thread: run VGT on all S3 images in the OA's prefixes."""
+    with app.app_context():
+        from vgt_service import call_vgt_api, convert_detections
+        from s3_service import list_s3_images, get_object_bytes
+
+        job = _pre_annotate_jobs[oa_id]
+        try:
+            # Collect all S3 keys from all prefixes
+            all_keys = []
+            for prefix in prefixes:
+                for key in list_s3_images(bucket, prefix):
+                    all_keys.append(key)
+
+            # Filter out already pre-annotated keys (in batches to avoid huge IN queries)
+            already_done = set()
+            batch_size = 500
+            for i in range(0, len(all_keys), batch_size):
+                batch_keys = all_keys[i:i + batch_size]
+                already_done.update(
+                    r[0] for r in db.session.query(db.distinct(PreAnnotation.s3_key))
+                    .filter(PreAnnotation.s3_key.in_(batch_keys)).all()
+                )
+
+            keys_to_process = [k for k in all_keys if k not in already_done]
+            job["total"] = len(keys_to_process)
+
+            if not keys_to_process:
+                job["status"] = "done"
+                return
+
+            for s3_key in keys_to_process:
+                # Check for stop signal
+                if job.get("stop"):
+                    job["status"] = "stopped"
+                    return
+
+                try:
+                    img_bytes = get_object_bytes(bucket, s3_key)
+                    filename = s3_key.split("/")[-1]
+                    detections = call_vgt_api(img_bytes, filename=filename)
+
+                    if detections is None:
+                        job["failed"] += 1
+                        job["processed"] += 1
+                        continue
+
+                    converted = convert_detections(detections)
+                    if converted:
+                        for ann in converted:
+                            db.session.add(PreAnnotation(
+                                s3_key=s3_key,
+                                class_id=ann["class_id"],
+                                x_center=ann["x_center"],
+                                y_center=ann["y_center"],
+                                width=ann["width"],
+                                height=ann["height"],
+                                confidence=ann["confidence"],
+                            ))
+                            job["total_boxes"] += 1
+                    else:
+                        # Placeholder so it's marked as processed
+                        db.session.add(PreAnnotation(
+                            s3_key=s3_key, class_id=-1,
+                            x_center=0, y_center=0, width=0, height=0, confidence=0,
+                        ))
+
+                    db.session.commit()
+                    job["success"] += 1
+
+                except Exception as e:
+                    print(f"[pre_annotate] Error for {s3_key}: {e}")
+                    db.session.rollback()
+                    job["failed"] += 1
+
+                job["processed"] += 1
+
+            job["status"] = "done"
+        except Exception as e:
+            print(f"[pre_annotate] Error for OA {oa_id}: {e}")
+            job["status"] = "error"
+            job["error"] = str(e)
+        finally:
+            db.session.remove()
+
+
+@admin_bp.route("/pre_annotate/<int:oa_id>", methods=["POST"])
+@role_required("admin")
+def pre_annotate(oa_id):
+    """Start background VGT pre-annotation for all images in OA's S3 prefixes."""
+    oa = User.query.get_or_404(oa_id)
+    if oa.role != "junior_oa":
+        return jsonify({"error": "Can only pre-annotate for Junior OAs."}), 400
+
+    existing_job = _pre_annotate_jobs.get(oa_id)
+    if existing_job and existing_job["status"] == "running":
+        return jsonify({"error": "Already running", "job": existing_job}), 409
+
+    bucket = os.environ.get("AWS_S3_BUCKET", "").strip() or None
+    if not bucket:
+        return jsonify({"error": "S3 bucket not configured."}), 400
+
+    cursors = OaCursor.query.filter_by(oa_id=oa_id).all()
+    if not cursors:
+        return jsonify({"error": "No S3 prefixes assigned."}), 400
+
+    prefixes = [c.prefix for c in cursors]
+
+    _pre_annotate_jobs[oa_id] = {
+        "status": "running",
+        "processed": 0,
+        "total": 0,
+        "success": 0,
+        "failed": 0,
+        "total_boxes": 0,
+    }
+
+    app = current_app._get_current_object()
+    t = threading.Thread(target=_run_pre_annotate, args=(app, oa_id, bucket, prefixes), daemon=True)
+    t.start()
+
+    return jsonify({"status": "started", "total": 0})
+
+
+@admin_bp.route("/pre_annotate_status/<int:oa_id>")
+@role_required("admin")
+def pre_annotate_status(oa_id):
+    """Poll endpoint for pre-annotation progress."""
+    job = _pre_annotate_jobs.get(oa_id)
+    if not job:
+        return jsonify({"status": "idle"})
+    return jsonify(job)
+
+
+@admin_bp.route("/pre_annotate_stop/<int:oa_id>", methods=["POST"])
+@role_required("admin")
+def pre_annotate_stop(oa_id):
+    """Signal the background pre-annotation job to stop."""
+    job = _pre_annotate_jobs.get(oa_id)
+    if not job or job["status"] != "running":
+        return jsonify({"error": "No running job to stop."}), 400
+    job["stop"] = True
+    return jsonify({"status": "stopping"})
