@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Model Annotation · Gemini{% endblock %}
+{% block header_title %}Model Annotation (Gemini){% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto; padding:24px;">
+
+    <p style="color:#666; margin-bottom:20px;">
+        Use Gemini to <strong>annotate</strong> images that are Awaiting Junior Review (it draws its own
+        bounding boxes and writes the labels to a separate <code>model_annotated</code> directory in S3).
+        The images then go through the normal human <strong>Junior Review</strong> like any other annotated
+        image — the model only does the annotation, not the review.
+    </p>
+
+    <div class="stats-grid" style="margin-bottom:24px;">
+        <div class="stat-card" style="border-color:#f59e0b;">
+            <div class="label">Awaiting (not yet model-annotated)</div>
+            <div class="value amber">{{ awaiting }}</div>
+            <div style="font-size:0.72rem; color:#888; margin-top:4px;">available for Gemini to annotate</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Model Annotated</div>
+            <div class="value muted">{{ model_annotated }}</div>
+            <div style="font-size:0.72rem; color:#888; margin-top:4px;">annotated by Gemini · in junior queue</div>
+        </div>
+    </div>
+
+    {% if not gemini_configured %}
+    <div class="alert alert-danger">
+        Gemini is not configured. Set <code>OPENROUTER_API_KEY</code> (and optionally
+        <code>GEMINI_MODEL</code>, default <code>google/gemini-3.1-pro-preview</code>) to enable model annotation.
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>Run Gemini Annotation</h3>
+        <p style="font-size:0.85em; color:#666; margin-bottom:14px;">
+            Choose how many of the {{ awaiting }} un-annotated images to send to Gemini in this batch.
+            It runs in the background — you can leave this page and come back; progress keeps going.
+        </p>
+        <div style="display:flex; gap:16px; align-items:end; flex-wrap:wrap;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Number of images</label>
+                <input type="number" id="countInput" min="1" value="{{ [awaiting, 20] | min if awaiting else 20 }}"
+                       style="width:140px; text-align:center; font-size:1.1em;">
+            </div>
+            {% if managed_annotators %}
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Annotator (optional)</label>
+                <select id="annotatorSelect" style="width:200px;">
+                    <option value="">All annotators</option>
+                    {% for a in managed_annotators %}
+                    <option value="{{ a.id }}">{{ a.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <button type="button" id="runBtn" class="btn-warning"
+                    {% if not gemini_configured %}disabled{% endif %}
+                    onclick="startAnnotate()">
+                Run Gemini Annotation
+            </button>
+        </div>
+        {% if gemini_configured and awaiting == 0 %}
+        <p id="nothingHint" style="font-size:0.82em; color:#92400e; margin-top:10px;">
+            Nothing to annotate right now — there are <strong>0</strong> images Awaiting Junior Review that
+            Gemini hasn't already annotated. Distribute images and have an annotator submit them first
+            (status <code>annotated</code>), then come back here.
+        </p>
+        {% endif %}
+
+        <!-- Live progress (background job) -->
+        <div id="progressBox" style="display:none; margin-top:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span id="progressLabel" style="font-weight:600; color:#92400e;">Starting…</span>
+                <button type="button" id="stopBtn" class="btn-danger btn-sm" onclick="stopAnnotate()">Stop</button>
+            </div>
+            <div style="background:#e5e7eb; border-radius:8px; height:22px; overflow:hidden;">
+                <div id="progressBar" style="background:#f59e0b; height:100%; width:0%;
+                     transition:width 0.3s; border-radius:8px;"></div>
+            </div>
+            <p id="progressDetail" style="font-size:0.8em; color:#555; margin-top:6px;"></p>
+        </div>
+        <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    </div>
+
+    <div style="margin-top:20px; display:flex; gap:10px;">
+        <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Go to Junior Review →</a>
+        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
+    </div>
+</div>
+
+<script>
+const RUN_URL = "{{ url_for('oa.model_review_run') }}";
+const STATUS_URL = "{{ url_for('oa.model_review_status') }}";
+const STOP_URL = "{{ url_for('oa.model_review_stop') }}";
+
+function _el(id) { return document.getElementById(id); }
+
+function renderJob(job) {
+    const box = _el('progressBox');
+    if (job.status === 'idle') {
+        // No job (or it was interrupted by a server restart). Re-enable controls.
+        box.style.display = 'none';
+        _el('runBtn').disabled = false;
+        _el('runBtn').textContent = 'Run Gemini Annotation';
+        return false;
+    }
+    box.style.display = 'block';
+    _el('runBtn').disabled = true;
+
+    const total = job.total || 0;
+    const done = job.processed || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    _el('progressBar').style.width = pct + '%';
+    _el('progressDetail').textContent =
+        `Done ${job.success || 0} · Failed ${job.failed || 0} · Boxes ${job.total_boxes || 0}`;
+
+    if (job.status === 'running') {
+        _el('progressLabel').textContent = `Annotating… ${done}/${total} (${pct}%)`;
+        _el('stopBtn').style.display = '';
+        return true;  // keep polling
+    }
+    // Terminal states
+    _el('stopBtn').style.display = 'none';
+    if (job.status === 'done') {
+        _el('progressBar').style.background = '#16a34a';
+        _el('progressLabel').textContent = `Done — ${job.success} annotated, ${job.total_boxes} boxes (${job.failed} failed)`;
+    } else if (job.status === 'stopped') {
+        _el('progressLabel').textContent = `Stopped — ${job.success}/${total} done`;
+    } else if (job.status === 'error') {
+        _el('progressBar').style.background = '#dc2626';
+        _el('progressLabel').textContent = `Error: ${job.error || 'unknown'}`;
+    }
+    _el('runBtn').disabled = false;
+    _el('runBtn').textContent = 'Run Again';
+    return false;  // stop polling
+}
+
+function poll() {
+    fetch(STATUS_URL).then(r => r.json()).then(job => {
+        const keepGoing = renderJob(job);
+        if (keepGoing) setTimeout(poll, 2000);
+        else if (job.status === 'done' || job.status === 'stopped') {
+            // refresh the counts after completion
+            setTimeout(() => location.reload(), 1500);
+        }
+    }).catch(() => setTimeout(poll, 3000));
+}
+
+function startAnnotate() {
+    const count = parseInt(_el('countInput').value, 10) || 0;
+    if (count <= 0) { alert('Enter how many images to send to Gemini.'); return; }
+    const annSel = _el('annotatorSelect');
+    const annId = annSel ? annSel.value : '';
+    _el('runBtn').disabled = true;
+    _el('runBtn').textContent = 'Starting…';
+    const body = new URLSearchParams({ count: count });
+    if (annId) body.set('annotator_id', annId);
+    fetch(RUN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
+        .then(r => r.json()).then(data => {
+            if (data.error) {
+                alert(data.error);
+                _el('runBtn').disabled = false;
+                _el('runBtn').textContent = 'Run Gemini Annotation';
+                return;
+            }
+            _el('progressBox').style.display = 'block';
+            poll();
+        }).catch(err => {
+            alert('Failed to start: ' + err.message);
+            _el('runBtn').disabled = false;
+            _el('runBtn').textContent = 'Run Gemini Annotation';
+        });
+}
+
+function stopAnnotate() {
+    const btn = _el('stopBtn');
+    btn.disabled = true; btn.textContent = 'Stopping…';
+    fetch(STOP_URL, { method: 'POST' }).then(r => r.json()).catch(() => {});
+}
+
+// On load, resume showing progress if a job is already running for this OA.
+poll();
+</script>
+{% endblock %}

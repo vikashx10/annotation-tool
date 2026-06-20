@@ -1,4 +1,6 @@
 import os
+import time
+import threading
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -10,6 +12,23 @@ oa_bp = Blueprint("oa", __name__, url_prefix="/oa")
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 _INSERT_BATCH = 2000
+
+# Background Gemini model-annotation jobs, keyed by junior OA id.
+_model_annotate_jobs = {}
+# How often (every N images) the worker prints a progress heartbeat.
+_PRE_ANNOTATE_LOG_EVERY = int(os.environ.get("PRE_ANNOTATE_LOG_EVERY", "5") or "5")
+
+# Junior review modes -> the WorkItem status that mode pulls from.
+#   annotated          : normal review of annotator work (incl. model-annotated)
+#   rejected_by_senior : fixing items the senior sent back
+REVIEW_MODE_STATUS = {
+    "annotated": "annotated",
+    "rejected_by_senior": "rejected_by_senior",
+}
+
+
+def _review_target_status(review_mode):
+    return REVIEW_MODE_STATUS.get(review_mode, "annotated")
 
 
 def _collect_keys_from_cursor(cursor, count, existing_keys):
@@ -87,6 +106,12 @@ def dashboard():
         WorkItem.annotator_id.isnot(None)
     ).count()
     total_annotated       = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated").count()
+    # Of those awaiting junior review, how many were annotated by Gemini.
+    total_model_annotated = WorkItem.query.filter(
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status == "annotated",
+        WorkItem.model_note.isnot(None),
+    ).count()
     total_awaiting_senior = WorkItem.query.filter_by(oa_id=current_user.id, status="junior_approved").count()
     total_junior_approved = WorkItem.query.filter(
         WorkItem.oa_id == current_user.id,
@@ -123,6 +148,7 @@ def dashboard():
         total_distributed=total_distributed,
         total_annotated=total_annotated,
         total_awaiting_senior=total_awaiting_senior,
+        total_model_annotated=total_model_annotated,
         total_junior_approved=total_junior_approved,
         total_approved=total_approved,
         total_rejected=total_rejected,
@@ -316,7 +342,7 @@ def deselect_annotator(annotator_id):
 def review():
     annotator_filter = request.args.get("annotator_id", type=int)
     review_mode = request.args.get("review_mode", "annotated")
-    target_status = "rejected_by_senior" if review_mode == "rejected_by_senior" else "annotated"
+    target_status = _review_target_status(review_mode)
     query = WorkItem.query.filter_by(oa_id=current_user.id, status=target_status)
     if annotator_filter:
         query = query.filter_by(annotator_id=annotator_filter)
@@ -357,6 +383,170 @@ def review_image(image_id):
         selected_annotator=request.args.get("annotator_id", type=int),
         review_mode=review_mode,
     )
+
+
+@oa_bp.route("/model_review", methods=["GET"])
+@role_required("junior_oa")
+def model_review():
+    """Gemini-powered ANNOTATION over the Awaiting Junior Review pool.
+
+    The model re-annotates images; they then go through the normal human Junior
+    Review. Lets the user run a user-adjustable batch through Gemini.
+    """
+    from gemini_service import _get_api_key
+
+    # Items not yet model-annotated (so a re-run doesn't redo the same images).
+    awaiting = WorkItem.query.filter(
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status == "annotated",
+        WorkItem.model_note.is_(None),
+    ).count()
+    model_annotated = WorkItem.query.filter(
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status == "annotated",
+        WorkItem.model_note.isnot(None),
+    ).count()
+
+    links = OaAnnotator.query.filter_by(oa_id=current_user.id).all()
+    annotator_ids = [l.annotator_id for l in links]
+    managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
+
+    return render_template("oa/model_review.html",
+        awaiting=awaiting,
+        model_annotated=model_annotated,
+        managed_annotators=managed_annotators,
+        gemini_configured=bool(_get_api_key()),
+    )
+
+
+def _run_model_annotate(app, oa_id, item_ids, bucket):
+    """Background thread: re-annotate the given WorkItems with Gemini, updating
+    the job progress tracker per image (so the UI can poll a live percentage)."""
+    with app.app_context():
+        from gemini_service import annotate_work_item
+        class_names = app.config["CLASS_NAMES"]
+        job = _model_annotate_jobs[oa_id]
+        tag = f"[model_annotate][OA {oa_id}]"
+        log_every = max(1, _PRE_ANNOTATE_LOG_EVERY)
+        total = len(item_ids)
+        start_ts = time.time()
+        try:
+            print(f"{tag} starting — {total} image(s) to annotate", flush=True)
+            for idx, item_id in enumerate(item_ids, 1):
+                if job.get("stop"):
+                    job["status"] = "stopped"
+                    print(f"{tag} STOPPED at {idx - 1}/{total}", flush=True)
+                    return
+
+                item = WorkItem.query.get(item_id)
+                if not item or item.status != "annotated":
+                    job["processed"] += 1
+                    continue
+                try:
+                    n = annotate_work_item(item, bucket, class_names)
+                    if n is None:
+                        db.session.rollback()
+                        job["failed"] += 1
+                        print(f"{tag} {idx}/{total} FAILED: {item.s3_key}", flush=True)
+                    else:
+                        db.session.commit()
+                        job["success"] += 1
+                        job["total_boxes"] += n
+                except Exception as e:
+                    db.session.rollback()
+                    job["failed"] += 1
+                    print(f"{tag} {idx}/{total} ERROR: {e}", flush=True)
+
+                job["processed"] += 1
+                if idx % log_every == 0 or idx == total:
+                    elapsed = time.time() - start_ts
+                    rate = idx / elapsed if elapsed > 0 else 0
+                    eta = (total - idx) / rate if rate > 0 else 0
+                    pct = idx * 100 // total if total else 100
+                    print(f"{tag} {idx}/{total} ({pct}%) | ok={job['success']} "
+                          f"failed={job['failed']} boxes={job['total_boxes']} | "
+                          f"{rate:.2f} img/s, ETA {eta/60:.1f} min", flush=True)
+
+            job["status"] = "done"
+            print(f"{tag} COMPLETE — {job['success']} ok, {job['failed']} failed, "
+                  f"{job['total_boxes']} boxes in {(time.time() - start_ts)/60:.1f} min", flush=True)
+        except Exception as e:
+            print(f"{tag} FATAL: {e}", flush=True)
+            job["status"] = "error"
+            job["error"] = str(e)
+        finally:
+            db.session.remove()
+
+
+@oa_bp.route("/model_review/run", methods=["POST"])
+@role_required("junior_oa")
+def model_review_run():
+    """Start a background Gemini annotation job over not-yet-model-annotated items."""
+    from gemini_service import _get_api_key
+
+    if not _get_api_key():
+        return jsonify({"error": "Gemini not configured (set OPENROUTER_API_KEY)."}), 400
+
+    existing = _model_annotate_jobs.get(current_user.id)
+    if existing and existing["status"] == "running":
+        return jsonify({"error": "Already running", "job": existing}), 409
+
+    count = request.form.get("count", 0, type=int)
+    if count <= 0:
+        return jsonify({"error": "Enter how many images to send to Gemini."}), 400
+
+    bucket = os.environ.get("AWS_S3_BUCKET", "").strip() or None
+    if not bucket:
+        return jsonify({"error": "S3 bucket not configured."}), 400
+
+    annotator_filter = request.form.get("annotator_id", type=int)
+    query = WorkItem.query.with_entities(WorkItem.id).filter(
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status == "annotated",
+        WorkItem.model_note.is_(None),
+    )
+    if annotator_filter:
+        query = query.filter(WorkItem.annotator_id == annotator_filter)
+    item_ids = [r[0] for r in query.limit(count).all()]
+
+    if not item_ids:
+        return jsonify({"error": "No un-annotated images left for Gemini."}), 400
+
+    _model_annotate_jobs[current_user.id] = {
+        "status": "running",
+        "processed": 0,
+        "total": len(item_ids),
+        "success": 0,
+        "failed": 0,
+        "total_boxes": 0,
+    }
+
+    app = current_app._get_current_object()
+    t = threading.Thread(target=_run_model_annotate,
+                         args=(app, current_user.id, item_ids, bucket), daemon=True)
+    t.start()
+    return jsonify({"status": "started", "total": len(item_ids)})
+
+
+@oa_bp.route("/model_review/status")
+@role_required("junior_oa")
+def model_review_status():
+    """Poll endpoint for the Gemini annotation job progress."""
+    job = _model_annotate_jobs.get(current_user.id)
+    if not job:
+        return jsonify({"status": "idle"})
+    return jsonify(job)
+
+
+@oa_bp.route("/model_review/stop", methods=["POST"])
+@role_required("junior_oa")
+def model_review_stop():
+    """Signal the running Gemini annotation job to stop."""
+    job = _model_annotate_jobs.get(current_user.id)
+    if not job or job["status"] != "running":
+        return jsonify({"error": "No running job to stop."}), 400
+    job["stop"] = True
+    return jsonify({"status": "stopping"})
 
 
 @oa_bp.route("/grid")
