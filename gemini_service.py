@@ -107,6 +107,9 @@ THE HIERARCHY RULE (most important):
   not part of the field below them.
 
 KEY-VALUE-PAIR RULES:
+- Treat every form INPUT FIELD as a "Key-Value Pair": the label/question is the key and its
+  input area (blank line/cell, checkbox(es), dropdown, date, signature line, etc.) is the value.
+  Box the whole field — key + value area — as one region, whatever the value widget is.
 - The box MUST enclose BOTH the label AND its value/answer area as one rectangle —
   INCLUDING the empty input space (the blank cell, underline, write-in line, box,
   or whitespace where the value goes). Do NOT box only the label text. This is a
@@ -115,6 +118,16 @@ KEY-VALUE-PAIR RULES:
   of the underline/dotted line, or the input-box outline) even when the value is
   empty/unfilled. For a checkbox item, include both the checkbox and its statement.
 - One field (label + its value slot) = one box. Do NOT merge several fields together.
+- QUESTION + ANSWER OPTIONS = ONE "Key-Value Pair". When a question/prompt is followed by a
+  set of selectable options (a row/group of checkboxes or radio buttons, or a multiple-choice
+  list such as years, Yes/No, or A/B/C choices), the QUESTION is the key and ALL its options
+  together are the value. Put the question text AND the entire option group inside ONE box.
+  Do NOT split each option (e.g. each year checkbox "2017", "2018", …) into its own box, and
+  do NOT label the question separately as "Text" or "Section Header".
+  • Example: 'Indicate which program year(s): [ ]2017 [ ]2018 [x]2019 [x]2020 [ ]2021' → ONE box.
+  Distinguish this from INDEPENDENT checkbox statements, where each checkbox has its own complete
+  standalone statement (e.g. "I recommend approval." / "I recommend denial.") — those are one
+  "Key-Value Pair" EACH.
 - A row with multiple value columns (e.g. "Rents ........ $[__]" with Business 1 / Business 2 columns)
   is still ONE "Key-Value Pair" per row — do not split per column, and do not label it as a Table.
 - A field that wraps onto two lines (long question + a Yes/No box on the right) is ONE "Key-Value Pair".
