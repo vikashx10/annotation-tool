@@ -101,6 +101,7 @@ def image_meta(image_id):
         "annotated_at": item.annotated_at.isoformat() if item.annotated_at else None,
         "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
         "reject_reason": item.reject_reason,
+        "model_note": item.model_note,
     })
 
 
@@ -287,15 +288,32 @@ def review_image(image_id):
         if item.status not in ("annotated", "rejected_by_senior"):
             return jsonify({"status": "error", "message": "Item is not reviewable"}), 400
 
-        _save_annotations_for_key(item.s3_key, annotations)
-        item.status = "junior_approved"
-        item.reject_reason = None
-        item.reviewed_at = datetime.now(timezone.utc)
-        db.session.commit()
+        if action == "reject":
+            # Send back to the annotator to re-annotate by hand. Drop the current
+            # (Gemini / old) boxes and model marker so they redraw from scratch
+            # (pre-annotations, if any, become the starting point).
+            Annotation.query.filter_by(s3_key=item.s3_key).delete()
+            item.status = "rejected"
+            item.model_note = None
+            item.reject_reason = data.get("reject_reason") or None
+            item.reviewed_at = datetime.now(timezone.utc)
+            db.session.commit()
+        else:  # approve
+            _save_annotations_for_key(item.s3_key, annotations)
+            item.status = "junior_approved"
+            item.reject_reason = None
+            item.reviewed_at = datetime.now(timezone.utc)
+            db.session.commit()
 
         # Determine which queue to pull next from based on current review mode
-        next_status = "rejected_by_senior" if data.get("review_mode") == "rejected_by_senior" else "annotated"
-        next_query = WorkItem.query.filter_by(oa_id=current_user.id, status=next_status)
+        review_mode = data.get("review_mode", "annotated")
+        next_query = WorkItem.query.filter_by(oa_id=current_user.id)
+        if review_mode == "model":
+            next_query = next_query.filter(WorkItem.status == "annotated", WorkItem.model_note.isnot(None))
+        elif review_mode == "rejected_by_senior":
+            next_query = next_query.filter(WorkItem.status == "rejected_by_senior")
+        else:
+            next_query = next_query.filter(WorkItem.status == "annotated")
         annotator_filter = data.get("annotator_id")
         if annotator_filter:
             next_query = next_query.filter_by(annotator_id=int(annotator_filter))
@@ -391,12 +409,13 @@ def peek_next_review():
 
     if current_user.role == "junior_oa":
         review_mode = request.args.get("review_mode", "annotated")
-        target_status = "rejected_by_senior" if review_mode == "rejected_by_senior" else "annotated"
-        q = WorkItem.query.filter(
-            WorkItem.oa_id == current_user.id,
-            WorkItem.status == target_status,
-            WorkItem.id != current_id,
-        )
+        q = WorkItem.query.filter(WorkItem.oa_id == current_user.id, WorkItem.id != current_id)
+        if review_mode == "model":
+            q = q.filter(WorkItem.status == "annotated", WorkItem.model_note.isnot(None))
+        elif review_mode == "rejected_by_senior":
+            q = q.filter(WorkItem.status == "rejected_by_senior")
+        else:
+            q = q.filter(WorkItem.status == "annotated")
         annotator_filter = request.args.get("annotator_id", type=int)
         if annotator_filter:
             q = q.filter_by(annotator_id=annotator_filter)

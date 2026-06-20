@@ -84,9 +84,14 @@
         <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     </div>
 
-    <div style="margin-top:20px; display:flex; gap:10px;">
-        <a href="{{ url_for('oa.review') }}" class="btn btn-primary">Go to Junior Review →</a>
-        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
+    <div style="margin-top:20px; display:flex; gap:10px; flex-wrap:wrap;">
+        {% if model_annotated > 0 %}
+        <a href="{{ url_for('oa.review', review_mode='model') }}" class="btn btn-primary">
+            Review Model-Annotated ({{ model_annotated }}) →
+        </a>
+        {% endif %}
+        <a href="{{ url_for('oa.review') }}" class="btn btn-secondary">All Junior Review</a>
+        <a href="{{ url_for('oa.dashboard') }}" class="btn btn-secondary">← Dashboard</a>
     </div>
 </div>
 
