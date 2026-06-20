@@ -103,6 +103,7 @@
         const val = this.value;
         const url = new URL('/oa/review', location.origin);
         if (val) url.searchParams.set('annotator_id', val);
+        if (reviewMode && reviewMode !== 'annotated') url.searchParams.set('review_mode', reviewMode);
         window.location = url.toString();
     });
 

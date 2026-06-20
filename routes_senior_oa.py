@@ -8,6 +8,10 @@ from s3_service import put_object
 
 senior_oa_bp = Blueprint("senior_oa", __name__, url_prefix="/senior_oa")
 
+# Items awaiting senior review. Both the human-first path and the Gemini
+# model-annotation path converge on 'junior_approved' once the junior signs off.
+AWAITING_SENIOR = ("junior_approved",)
+
 
 @senior_oa_bp.route("/")
 @role_required("senior_oa")
@@ -23,7 +27,7 @@ def dashboard():
     to_review = (
         WorkItem.query.filter(
             WorkItem.oa_id.in_(junior_ids),
-            WorkItem.status == "junior_approved"
+            WorkItem.status.in_(AWAITING_SENIOR)
         ).count()
         if junior_ids else 0
     )
@@ -44,7 +48,9 @@ def dashboard():
 
     junior_stats = []
     for jr in managed_juniors:
-        awaiting = WorkItem.query.filter_by(oa_id=jr.id, status="junior_approved").count()
+        awaiting = WorkItem.query.filter(
+            WorkItem.oa_id == jr.id, WorkItem.status.in_(AWAITING_SENIOR)
+        ).count()
         approved = WorkItem.query.filter_by(oa_id=jr.id, status="approved").count()
         sent_back = WorkItem.query.filter_by(oa_id=jr.id, status="rejected_by_senior").count()
         total = WorkItem.query.filter_by(oa_id=jr.id).count()
@@ -117,7 +123,7 @@ def approve_all():
 
     total = WorkItem.query.filter(
         WorkItem.oa_id.in_(junior_ids),
-        WorkItem.status == "junior_approved"
+        WorkItem.status.in_(AWAITING_SENIOR)
     ).count()
 
     if total == 0:
@@ -134,10 +140,10 @@ def approve_all():
         approved = 0
 
         while True:
-            # Fetch next batch (always query for junior_approved since we commit each batch)
+            # Fetch next batch (re-query each loop since we commit each batch)
             items = WorkItem.query.filter(
                 WorkItem.oa_id.in_(junior_ids),
-                WorkItem.status == "junior_approved"
+                WorkItem.status.in_(AWAITING_SENIOR)
             ).limit(BATCH_SIZE).all()
 
             if not items:
@@ -188,7 +194,7 @@ def review():
     item = (
         WorkItem.query.filter(
             WorkItem.oa_id.in_(junior_ids),
-            WorkItem.status == "junior_approved"
+            WorkItem.status.in_(AWAITING_SENIOR)
         ).first()
         if junior_ids else None
     )

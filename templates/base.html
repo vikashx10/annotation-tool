@@ -18,6 +18,7 @@
                     <a href="{{ url_for('admin.dashboard') }}" class="{% if request.blueprint == 'admin' %}active{% endif %}">Admin</a>
                 {% elif current_user.role == 'junior_oa' %}
                     <a href="{{ url_for('oa.dashboard') }}" class="{% if request.endpoint == 'oa.dashboard' %}active{% endif %}">Dashboard</a>
+                    <a href="{{ url_for('oa.model_review') }}" class="{% if request.endpoint in ['oa.model_review', 'oa.model_review_run'] %}active{% endif %}">Model Annotation</a>
                     <a href="{{ url_for('oa.grid') }}" class="{% if request.endpoint == 'oa.grid' %}active{% endif %}">Review Grid</a>
                 {% elif current_user.role == 'senior_oa' %}
                     <a href="{{ url_for('senior_oa.dashboard') }}" class="{% if request.blueprint == 'senior_oa' %}active{% endif %}">Dashboard</a>

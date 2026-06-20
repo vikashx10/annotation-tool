@@ -294,11 +294,8 @@ def review_image(image_id):
         db.session.commit()
 
         # Determine which queue to pull next from based on current review mode
-        review_mode = data.get("review_mode", "annotated")
-        if review_mode == "rejected_by_senior":
-            next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="rejected_by_senior")
-        else:
-            next_query = WorkItem.query.filter_by(oa_id=current_user.id, status="annotated")
+        next_status = "rejected_by_senior" if data.get("review_mode") == "rejected_by_senior" else "annotated"
+        next_query = WorkItem.query.filter_by(oa_id=current_user.id, status=next_status)
         annotator_filter = data.get("annotator_id")
         if annotator_filter:
             next_query = next_query.filter_by(annotator_id=int(annotator_filter))

@@ -1,5 +1,6 @@
 import io
 import os
+import time
 import threading
 import zipfile
 from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file, current_app, jsonify
@@ -341,15 +342,43 @@ def export_yolo():
 #              "success": N, "failed": N, "total_boxes": N}
 _pre_annotate_jobs = {}
 
+# How often (every N images) to print a progress heartbeat line.
+_PRE_ANNOTATE_LOG_EVERY = int(os.environ.get("PRE_ANNOTATE_LOG_EVERY", "5") or "5")
 
-def _run_pre_annotate(app, oa_id, bucket, prefixes):
-    """Background thread: run VGT on all S3 images in the OA's prefixes."""
+
+def _detect_pre_annotation_boxes(model, img_bytes, filename, class_names):
+    """Run the chosen model on one image.
+
+    Returns (responded, boxes): `responded` is True if the model returned a
+    (possibly empty) result; boxes is the detected box list.
+    """
+    if model == "gemini":
+        from gemini_service import reannotate_image
+        g_boxes = reannotate_image(img_bytes, filename, class_names)
+        if g_boxes is None:
+            return False, []
+        return True, [{**b, "confidence": 1.0} for b in g_boxes]
+
+    # Default: VGT
+    from vgt_service import call_vgt_api, convert_detections
+    detections = call_vgt_api(img_bytes, filename=filename)
+    if detections is None:
+        return False, []
+    return True, convert_detections(detections)
+
+
+def _run_pre_annotate(app, oa_id, bucket, prefixes, model="vgt"):
+    """Background thread: run the chosen model (VGT, Gemini, or both) on all
+    S3 images in the OA's prefixes and store results as PreAnnotations."""
     with app.app_context():
-        from vgt_service import call_vgt_api, convert_detections
         from s3_service import list_s3_images, get_object_bytes
+        class_names = app.config["CLASS_NAMES"]
 
         job = _pre_annotate_jobs[oa_id]
+        tag = f"[pre_annotate][OA {oa_id}][{model}]"
+        log_every = max(1, _PRE_ANNOTATE_LOG_EVERY)
         try:
+            print(f"{tag} starting — listing S3 images from {len(prefixes)} prefix(es)…", flush=True)
             # Collect all S3 keys from all prefixes
             all_keys = []
             for prefix in prefixes:
@@ -368,28 +397,40 @@ def _run_pre_annotate(app, oa_id, bucket, prefixes):
 
             keys_to_process = [k for k in all_keys if k not in already_done]
             job["total"] = len(keys_to_process)
+            job["already_done"] = len(already_done)
+            job["grand_total"] = len(all_keys)
+            print(f"{tag} {len(all_keys)} image(s) found, {len(already_done)} already done, "
+                  f"{len(keys_to_process)} to process", flush=True)
 
             if not keys_to_process:
                 job["status"] = "done"
+                print(f"{tag} nothing to process — done.", flush=True)
                 return
 
-            for s3_key in keys_to_process:
+            total = len(keys_to_process)
+            start_ts = time.time()
+            for idx, s3_key in enumerate(keys_to_process, 1):
                 # Check for stop signal
                 if job.get("stop"):
                     job["status"] = "stopped"
+                    print(f"{tag} STOPPED by user at {idx - 1}/{total} "
+                          f"(ok={job['success']} failed={job['failed']} boxes={job['total_boxes']})",
+                          flush=True)
                     return
 
                 try:
                     img_bytes = get_object_bytes(bucket, s3_key)
                     filename = s3_key.split("/")[-1]
-                    detections = call_vgt_api(img_bytes, filename=filename)
+                    responded, converted = _detect_pre_annotation_boxes(
+                        model, img_bytes, filename, class_names
+                    )
 
-                    if detections is None:
+                    if not responded:
                         job["failed"] += 1
                         job["processed"] += 1
+                        print(f"{tag} {idx}/{total} FAILED (no model response): {s3_key}", flush=True)
                         continue
 
-                    converted = convert_detections(detections)
                     if converted:
                         for ann in converted:
                             db.session.add(PreAnnotation(
@@ -413,15 +454,28 @@ def _run_pre_annotate(app, oa_id, bucket, prefixes):
                     job["success"] += 1
 
                 except Exception as e:
-                    print(f"[pre_annotate] Error for {s3_key}: {e}")
+                    print(f"{tag} {idx}/{total} ERROR for {s3_key}: {e}", flush=True)
                     db.session.rollback()
                     job["failed"] += 1
 
                 job["processed"] += 1
 
+                # Periodic progress heartbeat (and always on the last item).
+                if idx % log_every == 0 or idx == total:
+                    elapsed = time.time() - start_ts
+                    rate = idx / elapsed if elapsed > 0 else 0
+                    eta = (total - idx) / rate if rate > 0 else 0
+                    pct = idx * 100 // total
+                    print(f"{tag} {idx}/{total} ({pct}%) | ok={job['success']} "
+                          f"failed={job['failed']} boxes={job['total_boxes']} | "
+                          f"{rate:.2f} img/s, ETA {eta/60:.1f} min", flush=True)
+
             job["status"] = "done"
+            total_time = time.time() - start_ts
+            print(f"{tag} COMPLETE — {job['success']} ok, {job['failed']} failed, "
+                  f"{job['total_boxes']} boxes in {total_time/60:.1f} min", flush=True)
         except Exception as e:
-            print(f"[pre_annotate] Error for OA {oa_id}: {e}")
+            print(f"{tag} FATAL: {e}", flush=True)
             job["status"] = "error"
             job["error"] = str(e)
         finally:
@@ -431,10 +485,20 @@ def _run_pre_annotate(app, oa_id, bucket, prefixes):
 @admin_bp.route("/pre_annotate/<int:oa_id>", methods=["POST"])
 @role_required("admin")
 def pre_annotate(oa_id):
-    """Start background VGT pre-annotation for all images in OA's S3 prefixes."""
+    """Start background pre-annotation (VGT, Gemini, or both) for all images
+    in the OA's S3 prefixes."""
     oa = User.query.get_or_404(oa_id)
     if oa.role != "junior_oa":
         return jsonify({"error": "Can only pre-annotate for Junior OAs."}), 400
+
+    model = (request.form.get("model") or "vgt").strip().lower()
+    if model not in ("vgt", "gemini"):
+        return jsonify({"error": "Invalid model. Choose vgt or gemini."}), 400
+
+    if model == "gemini":
+        from gemini_service import _get_api_key
+        if not _get_api_key():
+            return jsonify({"error": "Gemini not configured (set OPENROUTER_API_KEY)."}), 400
 
     existing_job = _pre_annotate_jobs.get(oa_id)
     if existing_job and existing_job["status"] == "running":
@@ -452,15 +516,18 @@ def pre_annotate(oa_id):
 
     _pre_annotate_jobs[oa_id] = {
         "status": "running",
+        "model": model,
         "processed": 0,
         "total": 0,
+        "already_done": 0,
+        "grand_total": 0,
         "success": 0,
         "failed": 0,
         "total_boxes": 0,
     }
 
     app = current_app._get_current_object()
-    t = threading.Thread(target=_run_pre_annotate, args=(app, oa_id, bucket, prefixes), daemon=True)
+    t = threading.Thread(target=_run_pre_annotate, args=(app, oa_id, bucket, prefixes, model), daemon=True)
     t.start()
 
     return jsonify({"status": "started", "total": 0})

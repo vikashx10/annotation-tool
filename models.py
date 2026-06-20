@@ -76,6 +76,7 @@ class WorkItem(db.Model):
     annotator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     status = db.Column(db.String(20), default="pending")  # pending, annotated, junior_approved, approved, rejected, rejected_by_senior
     reject_reason = db.Column(db.Text, nullable=True)     # comment from senior when sending back
+    model_note = db.Column(db.Text, nullable=True)        # Gemini model-review verdict/notes
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     annotated_at = db.Column(db.DateTime, nullable=True)
     reviewed_at = db.Column(db.DateTime, nullable=True)
@@ -126,13 +127,14 @@ def init_db(app):
 
 def _add_missing_columns():
     """Add columns that may not exist in older databases."""
-    try:
-        db.session.execute(db.text(
-            "ALTER TABLE work_items ADD COLUMN IF NOT EXISTS reject_reason TEXT"
-        ))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+    for col in ("reject_reason", "model_note"):
+        try:
+            db.session.execute(db.text(
+                f"ALTER TABLE work_items ADD COLUMN IF NOT EXISTS {col} TEXT"
+            ))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 
 def _seed_users_from_env():

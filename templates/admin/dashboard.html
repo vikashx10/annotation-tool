@@ -329,6 +329,11 @@
                                     Running...
                                 </button>
                                 {% elif total_imgs > 0 and remaining > 0 %}
+                                <select id="preAnnotateModel-{{ stat.user.id }}"
+                                    style="padding:3px 6px; border:1px solid #d1d5db; border-radius:4px; font-size:0.74rem; background:#fff; width:auto;">
+                                    <option value="vgt">Model: VGT</option>
+                                    <option value="gemini">Model: Gemini</option>
+                                </select>
                                 <button id="preAnnotateBtn-{{ stat.user.id }}" class="btn-warning btn-sm"
                                     onclick="startPreAnnotate({{ stat.user.id }}, '{{ stat.user.username }}', {{ remaining }})">
                                     Pre-Annotate ({{ "{:,}".format(remaining) }})
@@ -444,7 +449,10 @@ function stopPreAnnotate(oaId) {
 }
 
 function startPreAnnotate(oaId, oaName, count) {
-    if (!confirm(`Run auto pre-annotation on ${count.toLocaleString()} images for ${oaName}?\n\nThis may take a while. You can close this page — it runs in the background.`)) return;
+    const modelSel = document.getElementById('preAnnotateModel-' + oaId);
+    const model = modelSel ? modelSel.value : 'vgt';
+    const modelLabel = { vgt: 'VGT', gemini: 'Gemini' }[model] || model;
+    if (!confirm(`Run auto pre-annotation with ${modelLabel} on ${count.toLocaleString()} images for ${oaName}?\n\nThis may take a while. You can close this page — it runs in the background.`)) return;
 
     const btn = document.getElementById('preAnnotateBtn-' + oaId);
     _setBtnRunning(btn);
@@ -453,6 +461,7 @@ function startPreAnnotate(oaId, oaName, count) {
     fetch(`/admin/pre_annotate/${oaId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'model=' + encodeURIComponent(model),
     }).then(r => r.json()).then(data => {
         if (data.error) {
             btn.style.background = '#dc3545';
@@ -477,13 +486,28 @@ function pollPreAnnotate(oaId) {
     fetch(`/admin/pre_annotate_status/${oaId}`)
         .then(r => r.json())
         .then(job => {
-            if (job.status === 'idle') return;
+            if (job.status === 'idle') {
+                // Job vanished (e.g. server restarted and killed the background
+                // thread). Don't freeze — reset the button so it can be re-run.
+                _hideStopBtn(oaId);
+                btn.disabled = false;
+                btn.style.background = '#dc3545';
+                btn.style.borderColor = '#dc3545';
+                btn.style.color = '#fff';
+                btn.style.whiteSpace = 'normal';
+                btn.innerHTML = 'Interrupted (server restarted) — click to resume';
+                return;
+            }
 
             if (job.status === 'running') {
                 let text;
-                if (job.total > 0) {
-                    const pct = Math.round((job.processed / job.total) * 100);
-                    text = `${job.processed.toLocaleString()}/${job.total.toLocaleString()} (${pct}%)`;
+                // Overall completion across ALL the OA's images (already-done +
+                // what this run has processed) — not just this run's batch.
+                const grand = job.grand_total || job.total || 0;
+                const done = (job.already_done || 0) + job.processed;
+                if (grand > 0) {
+                    const pct = Math.min(100, Math.round((done / grand) * 100));
+                    text = `${done.toLocaleString()}/${grand.toLocaleString()} (${pct}%)`;
                 } else {
                     text = 'Scanning S3...';
                 }
