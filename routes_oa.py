@@ -18,17 +18,17 @@ _model_annotate_jobs = {}
 # How often (every N images) the worker prints a progress heartbeat.
 _PRE_ANNOTATE_LOG_EVERY = int(os.environ.get("PRE_ANNOTATE_LOG_EVERY", "5") or "5")
 
-# Junior review modes -> the WorkItem status that mode pulls from.
-#   annotated          : normal review of annotator work (incl. model-annotated)
+# Junior review modes:
+#   annotated          : normal review of all awaiting-review work
 #   rejected_by_senior : fixing items the senior sent back
-REVIEW_MODE_STATUS = {
-    "annotated": "annotated",
-    "rejected_by_senior": "rejected_by_senior",
-}
-
-
-def _review_target_status(review_mode):
-    return REVIEW_MODE_STATUS.get(review_mode, "annotated")
+#   model              : review ONLY the Gemini model-annotated images
+def apply_review_filter(query, review_mode):
+    """Restrict a WorkItem query to the set a given Junior review mode shows."""
+    if review_mode == "model":
+        return query.filter(WorkItem.status == "annotated", WorkItem.model_note.isnot(None))
+    if review_mode == "rejected_by_senior":
+        return query.filter(WorkItem.status == "rejected_by_senior")
+    return query.filter(WorkItem.status == "annotated")
 
 
 def _collect_keys_from_cursor(cursor, count, existing_keys):
@@ -342,8 +342,7 @@ def deselect_annotator(annotator_id):
 def review():
     annotator_filter = request.args.get("annotator_id", type=int)
     review_mode = request.args.get("review_mode", "annotated")
-    target_status = _review_target_status(review_mode)
-    query = WorkItem.query.filter_by(oa_id=current_user.id, status=target_status)
+    query = apply_review_filter(WorkItem.query.filter_by(oa_id=current_user.id), review_mode)
     if annotator_filter:
         query = query.filter_by(annotator_id=annotator_filter)
     item = query.first()
