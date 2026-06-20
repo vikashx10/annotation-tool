@@ -82,8 +82,9 @@ Class definitions (with downstream meaning):
 - "Section Header" = a heading that OPENS a logical section. Includes numbered/styled section titles
   (e.g. "Part I", "Part II", "Part 1", "1.", "2."), bold/shaded/boxed title bars, standalone titles
   (e.g. "Identification", "Election"), and column captions that label a block (e.g. "Business 1 / Business 2").
-- "Key-Value Pair" = ONE label + its value/answer slot, as a single atomic unit
-  (e.g. "Business Number: ____", "Name: John", "Date: 01/01/2024"). A checkbox + its statement is a Key-Value Pair.
+- "Key-Value Pair" = ONE label + its value/answer slot — the box covers BOTH, including the
+  blank input area where the value goes (e.g. "Business Number: ____", "Name: John", "Date: 01/01/2024").
+  A checkbox + its statement is a Key-Value Pair.
 - "Text" = free-flowing paragraph or body text.
 - "Table" = a TRUE tabular grid of rows x columns (preserved as a table downstream).
 - "List Item" = a single bullet or numbered instruction/list entry (one box per bullet).
@@ -106,7 +107,14 @@ THE HIERARCHY RULE (most important):
   not part of the field below them.
 
 KEY-VALUE-PAIR RULES:
-- One label + one slot = one box. Do NOT merge several fields into a single box.
+- The box MUST enclose BOTH the label AND its value/answer area as one rectangle —
+  INCLUDING the empty input space (the blank cell, underline, write-in line, box,
+  or whitespace where the value goes). Do NOT box only the label text. This is a
+  common mistake: the value slot is usually blank on a form, but it is PART of the
+  field — extend the box to the field's visual boundary (the cell border, the end
+  of the underline/dotted line, or the input-box outline) even when the value is
+  empty/unfilled. For a checkbox item, include both the checkbox and its statement.
+- One field (label + its value slot) = one box. Do NOT merge several fields together.
 - A row with multiple value columns (e.g. "Rents ........ $[__]" with Business 1 / Business 2 columns)
   is still ONE "Key-Value Pair" per row — do not split per column, and do not label it as a Table.
 - A field that wraps onto two lines (long question + a Yes/No box on the right) is ONE "Key-Value Pair".
@@ -125,7 +133,9 @@ PROCEDURE:
 COMPLETENESS:
 - Every visible element MUST be inside exactly one tight bounding box. Scan top-left to bottom-right
   and do not skip anything. After segmenting, verify nothing visible is left uncovered.
-- Boxes must be TIGHT around their region (no loose whitespace, no cutting off text).
+- Boxes must be TIGHT around their region and never cut off text. NOTE: for a
+  "Key-Value Pair" the region INCLUDES the value/answer slot, so enclosing that
+  blank input area is REQUIRED and is NOT considered loose whitespace.
 - Do not overlap regions unless nesting is unavoidable. If unsure of a class, use "Text".
 
 Return ONLY a JSON object of this exact shape (no markdown, no explanation):
