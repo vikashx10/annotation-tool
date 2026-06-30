@@ -4,7 +4,7 @@ import threading
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from models import db, User, OaAnnotator, OaCursor, WorkItem, Config
+from models import db, User, OaAnnotator, SeniorJuniorOa, OaCursor, WorkItem, Config
 from auth import role_required
 from s3_service import get_s3_client
 
@@ -29,6 +29,30 @@ def apply_review_filter(query, review_mode):
     if review_mode == "rejected_by_senior":
         return query.filter(WorkItem.status == "rejected_by_senior")
     return query.filter(WorkItem.status == "annotated")
+
+
+def _sibling_juniors(junior_id):
+    """Other Junior OAs overseen by the same Senior OA(s) as this junior.
+
+    These are the only valid targets for handing off review work, so the
+    senior who oversees the items keeps oversight after the move.
+    """
+    senior_ids = [
+        row[0] for row in db.session.query(SeniorJuniorOa.senior_oa_id)
+        .filter(SeniorJuniorOa.junior_oa_id == junior_id)
+        .all()
+    ]
+    if not senior_ids:
+        return []
+    peer_ids = {
+        row[0] for row in db.session.query(SeniorJuniorOa.junior_oa_id)
+        .filter(SeniorJuniorOa.senior_oa_id.in_(senior_ids))
+        .all()
+    }
+    peer_ids.discard(junior_id)
+    if not peer_ids:
+        return []
+    return User.query.filter(User.id.in_(peer_ids), User.role == "junior_oa").all()
 
 
 def _collect_keys_from_cursor(cursor, count, existing_keys):
@@ -140,10 +164,13 @@ def dashboard():
         ).count()
         annotator_stats.append({"user": ann, "assigned": assigned, "awaiting_junior": awaiting_junior, "done": done})
 
+    sibling_juniors = _sibling_juniors(current_user.id)
+
     return render_template("oa/dashboard.html",
         managed_annotators=managed_annotators,
         available_annotators=available_annotators,
         annotator_stats=annotator_stats,
+        sibling_juniors=sibling_juniors,
         cursors=cursors,
         total_distributed=total_distributed,
         total_annotated=total_annotated,
@@ -323,6 +350,55 @@ def distribute():
     else:
         flash("No new images distributed — cursor may be exhausted.", "warning")
 
+    return redirect(url_for("oa.dashboard"))
+
+
+@oa_bp.route("/distribute_review", methods=["POST"])
+@role_required("junior_oa")
+def distribute_review():
+    """Hand off part of this junior's review backlog to another junior OA.
+
+    Moves up to `count` of the current junior's "Awaiting Junior Review"
+    items (status="annotated") to a peer junior under the same senior by
+    reassigning WorkItem.oa_id. Annotators and review history are untouched —
+    the items simply surface in the target junior's review queue instead.
+    """
+    target_id = request.form.get("target_oa_id", type=int)
+    count = request.form.get("count", 0, type=int)
+
+    if not target_id or count <= 0:
+        flash("Pick a junior OA and a number of images.", "danger")
+        return redirect(url_for("oa.dashboard"))
+
+    if target_id == current_user.id:
+        flash("Can't hand review work to yourself.", "danger")
+        return redirect(url_for("oa.dashboard"))
+
+    valid_targets = {j.id for j in _sibling_juniors(current_user.id)}
+    if target_id not in valid_targets:
+        flash("That junior OA isn't under your senior OA.", "danger")
+        return redirect(url_for("oa.dashboard"))
+
+    item_ids = [
+        row[0] for row in db.session.query(WorkItem.id)
+        .filter(WorkItem.oa_id == current_user.id, WorkItem.status == "annotated")
+        .order_by(WorkItem.id)
+        .limit(count)
+        .all()
+    ]
+    if not item_ids:
+        flash("No images awaiting junior review to hand off.", "warning")
+        return redirect(url_for("oa.dashboard"))
+
+    moved = WorkItem.query.filter(
+        WorkItem.id.in_(item_ids),
+        WorkItem.oa_id == current_user.id,
+        WorkItem.status == "annotated",
+    ).update({"oa_id": target_id}, synchronize_session=False)
+    db.session.commit()
+
+    target = User.query.get(target_id)
+    flash(f"Sent {moved} image(s) for review to '{target.username}'.", "success")
     return redirect(url_for("oa.dashboard"))
 
 
