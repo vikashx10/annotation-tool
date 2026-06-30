@@ -229,6 +229,56 @@
         </div>
         {% endif %}
 
+        {% if sibling_juniors %}
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e9ecef;">
+            <h3 style="margin-bottom:4px;">Distribute Review to Another Junior OA</h3>
+            <p style="font-size:0.85em; color:#666; margin-bottom:14px;">
+                Hand off part of your <strong>{{ total_annotated }}</strong> images awaiting junior review
+                to another junior OA under your senior. They review them instead — annotators are unaffected.
+            </p>
+            {% if total_annotated > 0 %}
+            <form method="POST" action="{{ url_for('oa.distribute_review') }}" id="form-distribute-review"
+                  style="display:flex; gap:16px; align-items:end; flex-wrap:wrap;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Send to</label>
+                    <select name="target_oa_id" required style="width:200px;">
+                        {% for j in sibling_juniors %}
+                        <option value="{{ j.id }}">{{ j.username }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>How many images</label>
+                    <input type="number" name="count" min="1" max="{{ total_annotated }}" value="0"
+                           style="width:120px; text-align:center;" required>
+                </div>
+                <button type="submit" class="btn-warning" id="distribute-review-btn">Send for Review</button>
+            </form>
+
+            <!-- Loading overlay (shown on submit) -->
+            <div id="distributeReviewOverlay" style="display:none; margin-top:16px; padding:14px 18px;
+                 background:#fff8e1; border:1px solid #f59e0b; border-radius:8px;
+                 align-items:center; gap:12px;">
+                <div style="width:18px; height:18px; border:3px solid #f59e0b; border-top-color:transparent;
+                     border-radius:50%; animation:spin 0.8s linear infinite; flex-shrink:0;"></div>
+                <span style="font-weight:500; color:#92400e;">Distributing review… please wait</span>
+            </div>
+            <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+            <script>
+            document.getElementById('form-distribute-review').addEventListener('submit', function() {
+                var overlay = document.getElementById('distributeReviewOverlay');
+                overlay.style.display = 'flex';
+                var btn = document.getElementById('distribute-review-btn');
+                btn.disabled = true;
+                btn.textContent = 'Sending…';
+            });
+            </script>
+            {% else %}
+            <p style="color:#6c757d; font-size:0.9em;">No images awaiting junior review to hand off.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <script>
         function showMode(mode) {
             document.getElementById('form-equal').style.display = mode === 'equal' ? '' : 'none';
