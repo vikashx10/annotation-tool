@@ -345,13 +345,19 @@ def review_image(image_id):
 
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
-        next_item = (
-            WorkItem.query.filter(
+        next_item = None
+        if junior_ids:
+            base = WorkItem.query.filter(
                 WorkItem.oa_id.in_(junior_ids),
-                WorkItem.status == "junior_approved"
-            ).first()
-            if junior_ids else None
-        )
+                WorkItem.status == "junior_approved",
+            )
+            # Advance FORWARD from the item just reviewed — don't jump back to the
+            # front of the queue each time.
+            next_item = base.filter(WorkItem.id > image_id).order_by(WorkItem.id).first()
+            if not next_item:
+                # Past the last item — wrap to any remaining earlier items so
+                # nothing gets stranded (e.g. when you started mid-queue).
+                next_item = base.order_by(WorkItem.id).first()
 
     if next_item:
         return jsonify({"status": "ok", "next_image_id": next_item.id})
@@ -398,18 +404,16 @@ def peek_next():
     return jsonify({"next_image_id": item.id if item else None})
 
 
-@api_bp.route("/peek_next_review")
-@login_required
-def peek_next_review():
-    """Return the next reviewable image ID for Junior OA or Senior OA.
-    No side effects — used only for prefetching.
-    """
-    current_id = request.args.get("current_id", type=int)
-    item = None
+def _review_queue_query():
+    """Base (unordered) WorkItem query for the current reviewer's queue.
 
+    Junior OA: their review queue for the request's review_mode / annotator_id.
+    Senior OA: junior_approved items from their managed juniors.
+    Returns None if the user isn't a reviewer or has nothing in scope.
+    """
     if current_user.role == "junior_oa":
         review_mode = request.args.get("review_mode", "annotated")
-        q = WorkItem.query.filter(WorkItem.oa_id == current_user.id, WorkItem.id != current_id)
+        q = WorkItem.query.filter(WorkItem.oa_id == current_user.id)
         if review_mode == "model":
             q = q.filter(WorkItem.status == "annotated", WorkItem.model_note.isnot(None))
         elif review_mode == "rejected_by_senior":
@@ -419,20 +423,57 @@ def peek_next_review():
         annotator_filter = request.args.get("annotator_id", type=int)
         if annotator_filter:
             q = q.filter_by(annotator_id=annotator_filter)
-        item = q.first()
+        return q
 
-    elif current_user.role == "senior_oa":
+    if current_user.role == "senior_oa":
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
-        if junior_ids:
-            item = WorkItem.query.filter(
-                WorkItem.oa_id.in_(junior_ids),
-                WorkItem.status == "junior_approved",
-                WorkItem.id != current_id,
-            ).first()
+        if not junior_ids:
+            return None
+        return WorkItem.query.filter(
+            WorkItem.oa_id.in_(junior_ids),
+            WorkItem.status == "junior_approved",
+        )
+
+    return None
+
+
+@api_bp.route("/peek_next_review")
+@login_required
+def peek_next_review():
+    """Return the next reviewable image ID for Junior OA or Senior OA.
+    Prefers the item *after* current_id (forward), so prefetch matches the
+    forward direction of the review flow. No side effects — prefetch only.
+    """
+    current_id = request.args.get("current_id", type=int)
+    q = _review_queue_query()
+    if q is None:
+        return jsonify({"next_image_id": None})
+
+    item = None
+    if current_id:
+        item = q.filter(WorkItem.id > current_id).order_by(WorkItem.id).first()
+    if not item:
+        item = q.filter(WorkItem.id != current_id).order_by(WorkItem.id).first()
 
     return jsonify({"next_image_id": item.id if item else None})
+
+
+@api_bp.route("/review_position")
+@login_required
+def review_position():
+    """Return the 1-based position of current_id within the reviewer's queue and
+    the queue total — powers the "position N / X" header indicator."""
+    current_id = request.args.get("current_id", type=int)
+    q = _review_queue_query()
+    if q is None:
+        return jsonify({"position": 0, "total": 0})
+
+    q = q.order_by(WorkItem.id)
+    total = q.count()
+    position = q.filter(WorkItem.id <= current_id).count() if current_id else 0
+    return jsonify({"position": position, "total": total})
 
 
 @api_bp.route("/navigate_review")

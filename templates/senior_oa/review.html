@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Final Review{% endblock %}
-{% block header_title %}Senior OA Review{% endblock %}
+{% block header_title %}Senior OA Review <span id="posIndicator" style="font-size:0.62em; color:#f59e0b; font-weight:600; margin-left:6px;"></span>{% endblock %}
 
 {% block head %}
 {% if image_id %}
@@ -199,7 +199,7 @@
             html += `<br><strong>Status</strong> <span class="badge badge-${m.status}">${m.status}</span>`;
             el.innerHTML = html;
         } catch(e) {}
-        refreshQueueInfo();
+        refreshQueueInfo(imageId);
     }
 
     async function loadImage(imageId) {
@@ -293,17 +293,23 @@
         } catch (e) { showToast('Error: ' + e.message, 'error'); }
     }
 
-    async function refreshQueueInfo() {
+    async function refreshQueueInfo(imageId) {
         try {
-            const resp = await fetch(`/api/review_jump?position=1`);
+            const q = imageId ? `?current_id=${imageId}` : '';
+            const resp = await fetch(`/api/review_position${q}`);
             const data = await resp.json();
             const el = document.getElementById('queueInfo');
+            const pos = document.getElementById('posIndicator');
             const inp = document.getElementById('jumpInput');
             if (data.total) {
                 el.textContent = `${data.total} item(s) awaiting final review`;
                 if (inp) inp.max = data.total;
+                if (pos) pos.textContent = data.position
+                    ? `position ${data.position} / ${data.total}`
+                    : `${data.total} in queue`;
             } else {
                 el.textContent = 'Queue empty';
+                if (pos) pos.textContent = '';
             }
         } catch (e) {}
     }
@@ -359,6 +365,6 @@
     });
 
     loadImage(currentImageId);
-    refreshQueueInfo();
+    refreshQueueInfo(currentImageId);
 </script>
 {% endblock %}
