@@ -41,6 +41,18 @@
             </button>
         </div>
 
+        <!-- Jump to a position in the queue (start from anywhere) -->
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+            <input type="number" id="jumpInput" min="1" placeholder="#"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();goToPosition();}"
+                style="width:64px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:0.82rem;">
+            <button onclick="goToPosition()" id="jumpBtn"
+                style="flex:1; padding:6px 10px; border:1px solid #111; background:#111; color:#fff; border-radius:4px; cursor:pointer; font-size:0.82rem;">
+                Go to position
+            </button>
+        </div>
+        <div id="queueInfo" style="font-size:0.72rem; color:#888; margin-bottom:10px;"></div>
+
         <button class="review-approve btn" id="approveBtn" onclick="doApprove()">
             Final Approve <span class="kbd">A</span>
         </button>
@@ -187,6 +199,7 @@
             html += `<br><strong>Status</strong> <span class="badge badge-${m.status}">${m.status}</span>`;
             el.innerHTML = html;
         } catch(e) {}
+        refreshQueueInfo();
     }
 
     async function loadImage(imageId) {
@@ -265,6 +278,36 @@
         } catch (e) { showToast('Error: ' + e.message, 'error'); }
     }
 
+    async function goToPosition() {
+        const pos = parseInt(document.getElementById('jumpInput').value, 10);
+        if (!pos || pos < 1) { showToast('Enter a position (1 or higher)', 'error'); return; }
+        try {
+            const resp = await fetch(`/api/review_jump?position=${pos}`);
+            const data = await resp.json();
+            if (data.image_id) {
+                await loadImage(data.image_id);
+                document.getElementById('jumpInput').value = data.position;
+            } else {
+                showToast('No item at that position', 'error');
+            }
+        } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    }
+
+    async function refreshQueueInfo() {
+        try {
+            const resp = await fetch(`/api/review_jump?position=1`);
+            const data = await resp.json();
+            const el = document.getElementById('queueInfo');
+            const inp = document.getElementById('jumpInput');
+            if (data.total) {
+                el.textContent = `${data.total} item(s) awaiting final review`;
+                if (inp) inp.max = data.total;
+            } else {
+                el.textContent = 'Queue empty';
+            }
+        } catch (e) {}
+    }
+
     function doReject() {
         if (!currentImageId) return;
         document.getElementById('rejectModal').style.display = 'block';
@@ -316,5 +359,6 @@
     });
 
     loadImage(currentImageId);
+    refreshQueueInfo();
 </script>
 {% endblock %}
