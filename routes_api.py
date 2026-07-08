@@ -454,7 +454,12 @@ def navigate_review():
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
         if junior_ids:
-            q = WorkItem.query.filter(WorkItem.oa_id.in_(junior_ids))
+            # Senior review queue is ONLY junior_approved items — Next/Prev must
+            # stay within it, not walk over annotator/pending images.
+            q = WorkItem.query.filter(
+                WorkItem.oa_id.in_(junior_ids),
+                WorkItem.status == "junior_approved",
+            )
         else:
             return jsonify({"image_id": None})
 
@@ -467,6 +472,62 @@ def navigate_review():
         item = q.filter(WorkItem.id < current_id).order_by(WorkItem.id.desc()).first()
 
     return jsonify({"image_id": item.id if item else None})
+
+
+@api_bp.route("/review_jump")
+@login_required
+def review_jump():
+    """Return the image ID at a 1-based position in the reviewer's queue, plus
+    the queue total — lets a reviewer start from anywhere in the queue.
+
+    Junior OA: their review queue for the given review_mode.
+    Senior OA: junior_approved items from their managed juniors.
+    """
+    position = request.args.get("position", 1, type=int)
+    q = None
+
+    if current_user.role == "junior_oa":
+        review_mode = request.args.get("review_mode", "annotated")
+        q = WorkItem.query.filter(WorkItem.oa_id == current_user.id)
+        if review_mode == "model":
+            q = q.filter(WorkItem.status == "annotated", WorkItem.model_note.isnot(None))
+        elif review_mode == "rejected_by_senior":
+            q = q.filter(WorkItem.status == "rejected_by_senior")
+        else:
+            q = q.filter(WorkItem.status == "annotated")
+        annotator_filter = request.args.get("annotator_id", type=int)
+        if annotator_filter:
+            q = q.filter_by(annotator_id=annotator_filter)
+
+    elif current_user.role == "senior_oa":
+        from models import SeniorJuniorOa
+        links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
+        junior_ids = [l.junior_oa_id for l in links]
+        if junior_ids:
+            q = WorkItem.query.filter(
+                WorkItem.oa_id.in_(junior_ids),
+                WorkItem.status == "junior_approved",
+            )
+
+    if q is None:
+        return jsonify({"image_id": None, "total": 0, "position": 0})
+
+    q = q.order_by(WorkItem.id)
+    total = q.count()
+    if total == 0:
+        return jsonify({"image_id": None, "total": 0, "position": 0})
+
+    if not position or position < 1:
+        position = 1
+    if position > total:
+        position = total
+
+    item = q.offset(position - 1).first()
+    return jsonify({
+        "image_id": item.id if item else None,
+        "total": total,
+        "position": position,
+    })
 
 
 @api_bp.route("/cursor_count/<int:cursor_id>")
