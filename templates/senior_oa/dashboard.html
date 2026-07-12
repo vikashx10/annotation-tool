@@ -27,7 +27,7 @@
     <!-- Actions -->
     <div class="card">
         <h3>Actions</h3>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
             {% if to_review > 0 %}
             <a href="{{ url_for('senior_oa.review') }}" class="btn btn-primary">
                 Review Next ({{ to_review }})
@@ -37,6 +37,21 @@
                 onclick="startBulkApprove()">
                 Approve All ({{ to_review }})
             </button>
+            {% endif %}
+            {% if junior_stats %}
+            <div style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+                <label for="reviewerFilter" style="font-size:0.84rem; color:#555;">Review by reviewer:</label>
+                <select id="reviewerFilter"
+                    onchange="if(this.value) window.location='{{ url_for('senior_oa.review') }}?junior_id='+this.value;"
+                    style="padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:0.84rem;">
+                    <option value="">Select reviewer…</option>
+                    {% for stat in junior_stats %}
+                    <option value="{{ stat.user.id }}"{% if stat.awaiting == 0 %} disabled{% endif %}>
+                        {{ stat.user.username }} ({{ stat.awaiting }} awaiting)
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
             {% endif %}
         </div>
         {% if not managed_juniors %}
@@ -72,6 +87,11 @@
                     <td>{% if stat.sent_back > 0 %}<span style="color:#dc3545; font-weight:600;">{{ stat.sent_back }}</span>{% else %}-{% endif %}</td>
                     <td style="color:#28a745; font-weight:600;">{{ stat.approved }}</td>
                     <td>
+                        {% if stat.awaiting > 0 %}
+                        <a href="{{ url_for('senior_oa.review', junior_id=stat.user.id) }}" class="btn btn-primary btn-sm">
+                            Review ({{ stat.awaiting }})
+                        </a>
+                        {% endif %}
                         <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">
                             <button type="submit" class="btn-danger btn-sm"
                                 onclick="return confirm('Remove {{ stat.user.username }} from your managed list?');">

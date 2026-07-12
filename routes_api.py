@@ -345,6 +345,9 @@ def review_image(image_id):
 
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        junior_filter = (request.get_json(silent=True) or {}).get("junior_id")
+        if junior_filter and int(junior_filter) in junior_ids:
+            junior_ids = [int(junior_filter)]
         next_item = (
             WorkItem.query.filter(
                 WorkItem.oa_id.in_(junior_ids),
@@ -425,6 +428,9 @@ def peek_next_review():
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        junior_filter = request.args.get("junior_id", type=int)
+        if junior_filter and junior_filter in junior_ids:
+            junior_ids = [junior_filter]
         if junior_ids:
             item = WorkItem.query.filter(
                 WorkItem.oa_id.in_(junior_ids),
@@ -453,6 +459,9 @@ def navigate_review():
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        junior_filter = request.args.get("junior_id", type=int)
+        if junior_filter and junior_filter in junior_ids:
+            junior_ids = [junior_filter]
         if junior_ids:
             q = WorkItem.query.filter(WorkItem.oa_id.in_(junior_ids))
         else:
