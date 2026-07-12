@@ -186,11 +186,22 @@ def _sse(event, data):
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _managed_junior_ids():
+    links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
+    return [l.junior_oa_id for l in links]
+
+
 @senior_oa_bp.route("/review")
 @role_required("senior_oa")
 def review():
-    links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
-    junior_ids = [l.junior_oa_id for l in links]
+    junior_ids = _managed_junior_ids()
+    # Optional reviewer filter: scope the queue to one junior OA.
+    junior_filter = request.args.get("junior_id", type=int)
+    if junior_filter and junior_filter in junior_ids:
+        junior_ids = [junior_filter]
+    else:
+        junior_filter = None
+
     item = (
         WorkItem.query.filter(
             WorkItem.oa_id.in_(junior_ids),
@@ -199,8 +210,11 @@ def review():
         if junior_ids else None
     )
     image_id = item.id if item else None
+    junior_name = User.query.get(junior_filter).username if junior_filter else None
     return render_template("senior_oa/review.html",
         image_id=image_id,
+        junior_filter=junior_filter,
+        junior_name=junior_name,
         class_names=__import__('flask').current_app.config["CLASS_NAMES"],
     )
 
@@ -208,8 +222,11 @@ def review():
 @senior_oa_bp.route("/review/<int:image_id>")
 @role_required("senior_oa")
 def review_image(image_id):
-    links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
-    junior_ids = [l.junior_oa_id for l in links]
+    junior_ids = _managed_junior_ids()
+    junior_filter = request.args.get("junior_id", type=int)
+    if not (junior_filter and junior_filter in junior_ids):
+        junior_filter = None
+
     item = WorkItem.query.filter(
         WorkItem.id == image_id,
         WorkItem.oa_id.in_(junior_ids)
@@ -217,7 +234,10 @@ def review_image(image_id):
     if not item:
         flash("Image not accessible.", "danger")
         return redirect(url_for("senior_oa.dashboard"))
+    junior_name = User.query.get(junior_filter).username if junior_filter else None
     return render_template("senior_oa/review.html",
         image_id=image_id,
+        junior_filter=junior_filter,
+        junior_name=junior_name,
         class_names=__import__('flask').current_app.config["CLASS_NAMES"],
     )

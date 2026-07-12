@@ -13,6 +13,12 @@
 
     <!-- Left sidebar -->
     <div class="review-sidebar">
+        {% if junior_name %}
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; padding:6px 10px; border-radius:6px; margin-bottom:10px; font-size:0.8rem;">
+            <span>Reviewing <strong>{{ junior_name }}</strong>'s queue</span>
+            <a href="{{ url_for('senior_oa.review') }}" style="color:#1e40af; text-decoration:underline; white-space:nowrap;">All reviewers</a>
+        </div>
+        {% endif %}
         <div class="review-meta" id="reviewMeta">Loading...</div>
 
         <!-- Edit toolbar -->
@@ -111,6 +117,9 @@
     ];
 
     let currentImageId = {{ image_id | tojson }};
+    const JUNIOR_FILTER = {{ junior_filter | tojson }};  // reviewer filter (junior OA id) or null
+    const _jf = JUNIOR_FILTER ? `&junior_id=${JUNIOR_FILTER}` : '';           // for URLs already carrying a query
+    const _jfq = JUNIOR_FILTER ? `?junior_id=${JUNIOR_FILTER}` : '';          // for URLs with no other query
 
     const ac = new AnnotationCanvas('annotationCanvas', {
         classNames: CLASS_NAMES,
@@ -177,7 +186,7 @@
 
     async function _kickPrefetch(afterId) {
         try {
-            const resp = await fetch(`/api/peek_next_review?current_id=${afterId}`);
+            const resp = await fetch(`/api/peek_next_review?current_id=${afterId}${_jf}`);
             const data = await resp.json();
             if (data.next_image_id) _prefetch(data.next_image_id);
         } catch (e) {}
@@ -238,7 +247,7 @@
             const resp = await fetch(`/api/review/${currentImageId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations() })
+                body: JSON.stringify({ action: 'approve', annotations: ac.getAnnotations(), junior_id: JUNIOR_FILTER })
             });
             const data = await resp.json();
             if (data.status === 'ok') {
@@ -261,7 +270,7 @@
     async function goNext() {
         if (!currentImageId) return;
         try {
-            const resp = await fetch(`/api/navigate_review?current_id=${currentImageId}&direction=next`);
+            const resp = await fetch(`/api/navigate_review?current_id=${currentImageId}&direction=next${_jf}`);
             const data = await resp.json();
             if (data.image_id) await loadImage(data.image_id);
             else showToast('No next image', 'error');
@@ -271,7 +280,7 @@
     async function goPrev() {
         if (!currentImageId) return;
         try {
-            const resp = await fetch(`/api/navigate_review?current_id=${currentImageId}&direction=prev`);
+            const resp = await fetch(`/api/navigate_review?current_id=${currentImageId}&direction=prev${_jf}`);
             const data = await resp.json();
             if (data.image_id) await loadImage(data.image_id);
             else showToast('No previous image', 'error');
@@ -282,7 +291,7 @@
         const pos = parseInt(document.getElementById('jumpInput').value, 10);
         if (!pos || pos < 1) { showToast('Enter a position (1 or higher)', 'error'); return; }
         try {
-            const resp = await fetch(`/api/review_jump?position=${pos}`);
+            const resp = await fetch(`/api/review_jump?position=${pos}${_jf}`);
             const data = await resp.json();
             if (data.image_id) {
                 await loadImage(data.image_id);
@@ -295,7 +304,7 @@
 
     async function refreshQueueInfo(imageId) {
         try {
-            const q = imageId ? `?current_id=${imageId}` : '';
+            const q = imageId ? `?current_id=${imageId}${_jf}` : _jfq;
             const resp = await fetch(`/api/review_position${q}`);
             const data = await resp.json();
             const el = document.getElementById('queueInfo');
@@ -334,7 +343,7 @@
             const resp = await fetch(`/api/review/${currentImageId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'reject', reject_reason: reason, annotations: ac.getAnnotations() })
+                body: JSON.stringify({ action: 'reject', reject_reason: reason, annotations: ac.getAnnotations(), junior_id: JUNIOR_FILTER })
             });
             const data = await resp.json();
             if (data.status === 'ok') {

@@ -345,6 +345,11 @@ def review_image(image_id):
 
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        # Optional reviewer filter (sent in the review POST body) keeps the
+        # forward-advance scoped to the junior whose queue is being reviewed.
+        junior_filter = (request.get_json(silent=True) or {}).get("junior_id")
+        if junior_filter and int(junior_filter) in junior_ids:
+            junior_ids = [int(junior_filter)]
         next_item = None
         if junior_ids:
             base = WorkItem.query.filter(
@@ -429,6 +434,10 @@ def _review_queue_query():
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        # Optional reviewer filter: scope the queue to a single junior OA.
+        junior_filter = request.args.get("junior_id", type=int)
+        if junior_filter and junior_filter in junior_ids:
+            junior_ids = [junior_filter]
         if not junior_ids:
             return None
         return WorkItem.query.filter(
@@ -494,6 +503,9 @@ def navigate_review():
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        junior_filter = request.args.get("junior_id", type=int)
+        if junior_filter and junior_filter in junior_ids:
+            junior_ids = [junior_filter]
         if junior_ids:
             # Senior review queue is ONLY junior_approved items — Next/Prev must
             # stay within it, not walk over annotator/pending images.
@@ -544,6 +556,9 @@ def review_jump():
         from models import SeniorJuniorOa
         links = SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id).all()
         junior_ids = [l.junior_oa_id for l in links]
+        junior_filter = request.args.get("junior_id", type=int)
+        if junior_filter and junior_filter in junior_ids:
+            junior_ids = [junior_filter]
         if junior_ids:
             q = WorkItem.query.filter(
                 WorkItem.oa_id.in_(junior_ids),
