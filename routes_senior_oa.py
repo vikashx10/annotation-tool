@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user
-from models import db, User, SeniorJuniorOa, WorkItem, Annotation
+from models import db, User, OaAnnotator, SeniorJuniorOa, WorkItem, Annotation
 from auth import role_required
 from s3_service import put_object
 
@@ -63,10 +63,36 @@ def dashboard():
             "total": total,
         })
 
+    # Annotators owned by this senior, with the juniors they are assigned to.
+    owned = User.query.filter_by(
+        role="annotator", senior_oa_id=current_user.id
+    ).order_by(User.username).all()
+
+    junior_names = {j.id: j.username for j in managed_juniors}
+    annotator_stats = []
+    for ann in owned:
+        assigned_to = [
+            junior_names.get(l.oa_id) or (User.query.get(l.oa_id).username
+                                          if User.query.get(l.oa_id) else "?")
+            for l in OaAnnotator.query.filter_by(annotator_id=ann.id).all()
+        ]
+        assigned = WorkItem.query.filter_by(annotator_id=ann.id).count()
+        done = WorkItem.query.filter(
+            WorkItem.annotator_id == ann.id,
+            WorkItem.status.in_(["annotated", "junior_approved", "approved"])
+        ).count()
+        annotator_stats.append({
+            "user": ann,
+            "juniors": [n for n in assigned_to if n],
+            "assigned": assigned,
+            "done": done,
+        })
+
     return render_template("senior_oa/dashboard.html",
         managed_juniors=managed_juniors,
         available_juniors=available_juniors,
         junior_stats=junior_stats,
+        annotator_stats=annotator_stats,
         to_review=to_review,
         total_approved=total_approved,
         total_sent_back=total_sent_back,
@@ -106,6 +132,72 @@ def remove_junior(junior_id):
         db.session.delete(link)
         db.session.commit()
         flash("Junior OA removed.", "success")
+    return redirect(url_for("senior_oa.dashboard"))
+
+
+@senior_oa_bp.route("/create_annotator", methods=["POST"])
+@role_required("senior_oa")
+def create_annotator():
+    """Create an annotator account owned by this Senior OA.
+
+    Ownership is what scopes the account: only Junior OAs overseen by this
+    senior will see the new annotator in their "Add Annotator" picker.
+    """
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+
+    if not username or not password:
+        flash("Username and password are required.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    if len(password) < 4:
+        flash("Password must be at least 4 characters.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    if User.query.filter_by(username=username).first():
+        flash(f"Username '{username}' is already taken.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    user = User(username=username, role="annotator", senior_oa_id=current_user.id)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    flash(f"Annotator '{username}' created under your account.", "success")
+    return redirect(url_for("senior_oa.dashboard"))
+
+
+@senior_oa_bp.route("/remove_annotator/<int:annotator_id>", methods=["POST"])
+@role_required("senior_oa")
+def remove_annotator(annotator_id):
+    """Release an annotator from this senior's account.
+
+    The account is kept (only an admin deletes users) but it stops being
+    visible to this senior's juniors, and its unfinished work returns to the
+    junior's unassigned pool. Annotated/approved work keeps its annotator
+    reference so nothing already done is lost.
+    """
+    user = User.query.filter_by(
+        id=annotator_id, role="annotator", senior_oa_id=current_user.id
+    ).first()
+    if not user:
+        flash("Annotator not found under your account.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    junior_ids = _managed_junior_ids()
+    if junior_ids:
+        WorkItem.query.filter(
+            WorkItem.oa_id.in_(junior_ids),
+            WorkItem.annotator_id == annotator_id,
+            WorkItem.status.in_(["pending", "rejected"])
+        ).update({"annotator_id": None}, synchronize_session=False)
+        OaAnnotator.query.filter(
+            OaAnnotator.annotator_id == annotator_id,
+            OaAnnotator.oa_id.in_(junior_ids)
+        ).delete(synchronize_session=False)
+
+    user.senior_oa_id = None
+    db.session.commit()
+    flash(f"Annotator '{user.username}' released from your account.", "success")
     return redirect(url_for("senior_oa.dashboard"))
 
 

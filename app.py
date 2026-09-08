@@ -50,6 +50,53 @@ def _migrate_db(app):
             except Exception:
                 pass
 
+        # users.senior_oa_id is added in models._add_missing_columns(), which runs
+        # before any ORM query. Only the data backfill belongs here.
+        _backfill_annotator_owner()
+
+
+# Senior OA that pre-existing annotators are handed to when the ownership
+# column is first introduced. Override per-environment if needed.
+BACKFILL_SENIOR_USERNAME = os.environ.get(
+    "SENIOR_OA_BACKFILL_USERNAME", "demo_senior_oa"
+).strip()
+
+# Config key marking the backfill as already applied.
+_BACKFILL_FLAG = "migration:annotator_senior_owner_backfill"
+
+
+def _backfill_annotator_owner():
+    """One-time: hand every pre-existing annotator to BACKFILL_SENIOR_USERNAME.
+
+    Runs at most once per database — guarded by a row in `config` — so that
+    annotators created (or self-registered) later are NOT swept into the same
+    senior on the next restart.
+    """
+    from models import Config, User
+
+    if Config.query.get(_BACKFILL_FLAG):
+        return
+
+    senior = User.query.filter_by(
+        username=BACKFILL_SENIOR_USERNAME, role="senior_oa"
+    ).first()
+    if not senior:
+        # Senior does not exist yet (fresh DB, or seeded later). Leave the flag
+        # unset so the backfill still runs once that account shows up.
+        print(f"[migrate] senior OA '{BACKFILL_SENIOR_USERNAME}' not found — "
+              "annotator backfill deferred")
+        return
+
+    updated = User.query.filter(
+        User.role == "annotator",
+        User.senior_oa_id.is_(None),
+    ).update({"senior_oa_id": senior.id}, synchronize_session=False)
+
+    db.session.add(Config(key=_BACKFILL_FLAG, value=str(senior.id)))
+    db.session.commit()
+    print(f"[migrate] assigned {updated} existing annotator(s) to "
+          f"'{BACKFILL_SENIOR_USERNAME}'")
+
 
 def create_app():
     app = Flask(__name__)

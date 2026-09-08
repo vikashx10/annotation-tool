@@ -306,8 +306,16 @@
             </div>
             <button type="submit" class="btn-primary">Add</button>
         </form>
+        {% elif not has_senior %}
+        <p style="color:#6c757d; margin-bottom:16px;">
+            No annotators available — you are not assigned to a Senior OA yet.
+            Annotators are created by a Senior OA and become selectable here once
+            that senior adds you as one of their Junior OAs.
+        </p>
         {% else %}
-        <p style="color:#6c757d; margin-bottom:16px;">No available annotators to add.</p>
+        <p style="color:#6c757d; margin-bottom:16px;">
+            No available annotators to add. Ask your Senior OA to create one.
+        </p>
         {% endif %}
 
         {% if annotator_stats %}

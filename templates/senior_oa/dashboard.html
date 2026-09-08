@@ -127,6 +127,68 @@
         {% endif %}
     </div>
 
+    <!-- My Annotators -->
+    <div class="card">
+        <h3>My Annotators</h3>
+        <p style="color:#6c757d; font-size:0.86rem; margin-top:-4px;">
+            Annotators you create belong to your account. Only the Junior OAs you
+            manage can add them to a team and distribute work to them.
+        </p>
+
+        <form method="POST" action="{{ url_for('senior_oa.create_annotator') }}"
+              style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:16px;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Username</label>
+                <input type="text" name="username" required style="width:200px;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Password</label>
+                <input type="password" name="password" required minlength="4" style="width:200px;">
+            </div>
+            <button type="submit" class="btn-primary">Create Annotator</button>
+        </form>
+
+        {% if annotator_stats %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Annotator</th>
+                    <th>Assigned To</th>
+                    <th>Images Assigned</th>
+                    <th>Completed</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat in annotator_stats %}
+                <tr>
+                    <td>{{ stat.user.username }}</td>
+                    <td>
+                        {% if stat.juniors %}
+                            {{ stat.juniors | join(', ') }}
+                        {% else %}
+                            <span style="color:#6c757d;">not on a team yet</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ stat.assigned }}</td>
+                    <td style="font-weight:600;">{{ stat.done }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('senior_oa.remove_annotator', annotator_id=stat.user.id) }}" style="display:inline;">
+                            <button type="submit" class="btn-danger btn-sm"
+                                onclick="return confirm('Release {{ stat.user.username }} from your account? Their unfinished images go back to the unassigned pool.');">
+                                Release
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:#6c757d;">No annotators yet. Create one above.</p>
+        {% endif %}
+    </div>
+
     <!-- Bulk Approve Progress (hidden by default) -->
     <div id="bulkProgress" class="card" style="display:none;">
         <h3>Bulk Approve Progress</h3>
