@@ -55,33 +55,6 @@ def _sibling_juniors(junior_id):
     return User.query.filter(User.id.in_(peer_ids), User.role == "junior_oa").all()
 
 
-def _senior_ids_for(junior_id):
-    """Senior OAs overseeing this junior."""
-    return [
-        row[0] for row in db.session.query(SeniorJuniorOa.senior_oa_id)
-        .filter(SeniorJuniorOa.junior_oa_id == junior_id)
-        .all()
-    ]
-
-
-def _selectable_annotators(junior_id):
-    """Annotators this junior is allowed to manage.
-
-    Scoped to accounts owned by the Senior OA(s) overseeing this junior — a
-    Senior OA creates annotators under their own account, and only their
-    juniors can pick them up. Annotators with no owner (self-registered, or
-    admin-created without a senior) belong to nobody and stay hidden until an
-    admin assigns them an owner.
-    """
-    senior_ids = _senior_ids_for(junior_id)
-    if not senior_ids:
-        return []
-    return User.query.filter(
-        User.role == "annotator",
-        User.senior_oa_id.in_(senior_ids),
-    ).order_by(User.username).all()
-
-
 def _collect_keys_from_cursor(cursor, count, existing_keys):
     """List up to `count` new image keys from S3, advancing the cursor.
 
@@ -145,10 +118,8 @@ def dashboard():
     annotator_ids = [l.annotator_id for l in links]
     managed_annotators = User.query.filter(User.id.in_(annotator_ids)).all() if annotator_ids else []
 
-    selectable = _selectable_annotators(current_user.id)
-    available_annotators = [a for a in selectable if a.id not in annotator_ids]
-    # No senior means no annotator pool — the template explains why the list is empty.
-    has_senior = bool(_senior_ids_for(current_user.id))
+    all_annotators = User.query.filter_by(role="annotator").all()
+    available_annotators = [a for a in all_annotators if a.id not in annotator_ids]
 
     cursors = OaCursor.query.filter_by(oa_id=current_user.id).all()
     cursor = cursors  # pass list to template
@@ -198,7 +169,6 @@ def dashboard():
     return render_template("oa/dashboard.html",
         managed_annotators=managed_annotators,
         available_annotators=available_annotators,
-        has_senior=has_senior,
         annotator_stats=annotator_stats,
         sibling_juniors=sibling_juniors,
         cursors=cursors,
@@ -226,11 +196,6 @@ def add_annotator():
     user = User.query.get(annotator_id)
     if not user or user.role != "annotator":
         flash("Invalid annotator.", "danger")
-        return redirect(url_for("oa.dashboard"))
-
-    # Only annotators owned by a senior overseeing this junior may be picked up.
-    if user.senior_oa_id not in _senior_ids_for(current_user.id):
-        flash("That annotator is not available to you.", "danger")
         return redirect(url_for("oa.dashboard"))
 
     existing = OaAnnotator.query.filter_by(oa_id=current_user.id, annotator_id=annotator_id).first()

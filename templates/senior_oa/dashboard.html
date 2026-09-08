@@ -106,36 +106,15 @@
     </div>
     {% endif %}
 
-    <!-- Manage Junior OAs -->
+    <!-- My Junior OAs -->
     <div class="card">
-        <h3>Manage Junior OAs</h3>
-        {% if available_juniors %}
-        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}"
-              style="display:flex; gap:10px; align-items:end;">
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Add Junior OA</label>
-                <select name="junior_id" style="width:220px;">
-                    {% for j in available_juniors %}
-                    <option value="{{ j.id }}">{{ j.username }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="btn-primary">Add</button>
-        </form>
-        {% else %}
-        <p style="color:#6c757d;">No available Junior OAs to add.</p>
-        {% endif %}
-    </div>
-
-    <!-- My Annotators -->
-    <div class="card">
-        <h3>My Annotators</h3>
+        <h3>My Junior OAs{% if owned_junior_stats %} ({{ owned_junior_stats | length }}){% endif %}</h3>
         <p style="color:#6c757d; font-size:0.86rem; margin-top:-4px;">
-            Annotators you create belong to your account. Only the Junior OAs you
-            manage can add them to a team and distribute work to them.
+            Junior OAs you create belong to your account. Only Junior OAs you
+            created can be added to your team.
         </p>
 
-        <form method="POST" action="{{ url_for('senior_oa.create_annotator') }}"
+        <form method="POST" action="{{ url_for('senior_oa.create_junior') }}"
               style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:16px;">
             <div class="form-group" style="margin-bottom:0;">
                 <label>Username</label>
@@ -145,47 +124,54 @@
                 <label>Password</label>
                 <input type="password" name="password" required minlength="4" style="width:200px;">
             </div>
-            <button type="submit" class="btn-primary">Create Annotator</button>
+            <button type="submit" class="btn-primary">Create Junior OA</button>
         </form>
 
-        {% if annotator_stats %}
+        {% if owned_junior_stats %}
         <table>
             <thead>
                 <tr>
-                    <th>Annotator</th>
-                    <th>Assigned To</th>
-                    <th>Images Assigned</th>
-                    <th>Completed</th>
+                    <th>Junior OA</th>
+                    <th>On My Team</th>
+                    <th>Annotators</th>
+                    <th>Images</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                {% for stat in annotator_stats %}
+                {% for stat in owned_junior_stats %}
                 <tr>
                     <td>{{ stat.user.username }}</td>
                     <td>
-                        {% if stat.juniors %}
-                            {{ stat.juniors | join(', ') }}
+                        {% if stat.on_team %}
+                            <span class="badge badge-approved">yes</span>
                         {% else %}
-                            <span style="color:#6c757d;">not on a team yet</span>
+                            <span style="color:#6c757d;">not added</span>
                         {% endif %}
                     </td>
-                    <td>{{ stat.assigned }}</td>
-                    <td style="font-weight:600;">{{ stat.done }}</td>
+                    <td>{{ stat.annotators }}</td>
+                    <td>{{ stat.items }}</td>
                     <td>
-                        <form method="POST" action="{{ url_for('senior_oa.remove_annotator', annotator_id=stat.user.id) }}" style="display:inline;">
+                        {% if not stat.on_team %}
+                        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}" style="display:inline;">
+                            <input type="hidden" name="junior_id" value="{{ stat.user.id }}">
+                            <button type="submit" class="btn-primary btn-sm">Add to Team</button>
+                        </form>
+                        {% else %}
+                        <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">
                             <button type="submit" class="btn-danger btn-sm"
-                                onclick="return confirm('Release {{ stat.user.username }} from your account? Their unfinished images go back to the unassigned pool.');">
-                                Release
+                                onclick="return confirm('Remove {{ stat.user.username }} from your team? They keep their account and work.');">
+                                Remove from Team
                             </button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
-        <p style="color:#6c757d;">No annotators yet. Create one above.</p>
+        <p style="color:#6c757d;">No Junior OAs yet. Create one above.</p>
         {% endif %}
     </div>
 

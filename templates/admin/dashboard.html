@@ -250,14 +250,14 @@
             <div class="form-group" style="margin-bottom:0;">
                 <label>Role</label>
                 <select name="role" id="createRole" style="width:150px;"
-                        onchange="document.getElementById('ownerField').style.display = this.value === 'annotator' ? '' : 'none';">
+                        onchange="document.getElementById('ownerField').style.display = this.value === 'junior_oa' ? '' : 'none';">
                     <option value="annotator">Annotator</option>
                     <option value="junior_oa">Junior OA</option>
                     <option value="senior_oa">Senior OA</option>
                     <option value="admin">Admin</option>
                 </select>
             </div>
-            <div class="form-group" id="ownerField" style="margin-bottom:0;">
+            <div class="form-group" id="ownerField" style="margin-bottom:0; display:none;">
                 <label>Senior OA (owner)</label>
                 <select name="senior_oa_id" style="width:180px;">
                     <option value="">— none —</option>
@@ -269,30 +269,30 @@
             <button type="submit" class="btn-primary">Create</button>
         </form>
         <p style="color:#6c757d; font-size:0.82rem; margin-top:10px;">
-            An annotator with no Senior OA owner cannot be added by any Junior OA.
-            Senior OAs can also create their own annotators from their dashboard.
+            A Junior OA with no Senior OA owner cannot be added to any senior's team.
+            Senior OAs can also create their own Junior OAs from their dashboard.
         </p>
     </div>
 
-    <!-- Unowned annotators -->
-    {% if unowned_annotators %}
+    <!-- Unowned Junior OAs -->
+    {% if unowned_juniors %}
     <div class="card" style="border-color:#f0ad4e;">
-        <h3>Unowned Annotators ({{ unowned_annotators | length }})</h3>
+        <h3>Unowned Junior OAs ({{ unowned_juniors | length }})</h3>
         <p style="color:#6c757d; font-size:0.86rem; margin-top:-4px;">
-            These accounts belong to no Senior OA, so no Junior OA can see them.
-            Assign an owner to bring them into a team.
+            These accounts belong to no Senior OA, so no senior can add them to a
+            team. Assign an owner to make them selectable.
         </p>
         <table>
             <thead><tr><th>Username</th><th>Created</th><th>Assign To</th></tr></thead>
             <tbody>
-                {% for a in unowned_annotators %}
+                {% for j in unowned_juniors %}
                 <tr>
-                    <td>{{ a.username }}</td>
-                    <td>{{ a.created_at.strftime('%Y-%m-%d') if a.created_at else '' }}</td>
+                    <td>{{ j.username }}</td>
+                    <td>{{ j.created_at.strftime('%Y-%m-%d') if j.created_at else '' }}</td>
                     <td>
-                        <form method="POST" action="{{ url_for('admin.assign_annotator_owner') }}"
+                        <form method="POST" action="{{ url_for('admin.assign_junior_owner') }}"
                               style="display:flex; gap:8px; align-items:center;">
-                            <input type="hidden" name="annotator_id" value="{{ a.id }}">
+                            <input type="hidden" name="junior_id" value="{{ j.id }}">
                             <select name="senior_oa_id" required style="width:180px;">
                                 <option value="">Select Senior OA…</option>
                                 {% for so in senior_oas %}
@@ -436,7 +436,7 @@
                     <td>{{ user.username }}</td>
                     <td><span class="badge badge-{{ 'approved' if user.role == 'admin' else ('annotated' if user.role in ('junior_oa','senior_oa') else 'pending') }}">{{ 'Junior OA' if user.role == 'junior_oa' else ('Senior OA' if user.role == 'senior_oa' else user.role) }}</span></td>
                     <td>
-                        {% if user.role == 'annotator' %}
+                        {% if user.role == 'junior_oa' %}
                             {% if owner_names.get(user.id) %}
                                 {{ owner_names[user.id] }}
                             {% else %}

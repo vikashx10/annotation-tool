@@ -20,8 +20,11 @@ def dashboard():
     junior_ids = [l.junior_oa_id for l in links]
     managed_juniors = User.query.filter(User.id.in_(junior_ids)).all() if junior_ids else []
 
-    all_juniors = User.query.filter_by(role="junior_oa").all()
-    available_juniors = [j for j in all_juniors if j.id not in junior_ids]
+    # Only Junior OAs this senior created (owns) can be added to their team.
+    owned_juniors = User.query.filter_by(
+        role="junior_oa", senior_oa_id=current_user.id
+    ).order_by(User.username).all()
+    available_juniors = [j for j in owned_juniors if j.id not in junior_ids]
 
     # Queue: junior_approved items from managed junior OAs
     to_review = (
@@ -63,36 +66,23 @@ def dashboard():
             "total": total,
         })
 
-    # Annotators owned by this senior, with the juniors they are assigned to.
-    owned = User.query.filter_by(
-        role="annotator", senior_oa_id=current_user.id
-    ).order_by(User.username).all()
-
-    junior_names = {j.id: j.username for j in managed_juniors}
-    annotator_stats = []
-    for ann in owned:
-        assigned_to = [
-            junior_names.get(l.oa_id) or (User.query.get(l.oa_id).username
-                                          if User.query.get(l.oa_id) else "?")
-            for l in OaAnnotator.query.filter_by(annotator_id=ann.id).all()
-        ]
-        assigned = WorkItem.query.filter_by(annotator_id=ann.id).count()
-        done = WorkItem.query.filter(
-            WorkItem.annotator_id == ann.id,
-            WorkItem.status.in_(["annotated", "junior_approved", "approved"])
-        ).count()
-        annotator_stats.append({
-            "user": ann,
-            "juniors": [n for n in assigned_to if n],
-            "assigned": assigned,
-            "done": done,
-        })
+    # Every Junior OA this senior owns, whether or not they are on the team yet.
+    managed_ids = set(junior_ids)
+    owned_junior_stats = [
+        {
+            "user": j,
+            "on_team": j.id in managed_ids,
+            "annotators": OaAnnotator.query.filter_by(oa_id=j.id).count(),
+            "items": WorkItem.query.filter_by(oa_id=j.id).count(),
+        }
+        for j in owned_juniors
+    ]
 
     return render_template("senior_oa/dashboard.html",
         managed_juniors=managed_juniors,
         available_juniors=available_juniors,
         junior_stats=junior_stats,
-        annotator_stats=annotator_stats,
+        owned_junior_stats=owned_junior_stats,
         to_review=to_review,
         total_approved=total_approved,
         total_sent_back=total_sent_back,
@@ -110,6 +100,11 @@ def add_junior():
     user = User.query.get(junior_id)
     if not user or user.role != "junior_oa":
         flash("Invalid Junior OA.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    # A senior may only add Junior OAs they created.
+    if user.senior_oa_id != current_user.id:
+        flash("That Junior OA was not created by you.", "danger")
         return redirect(url_for("senior_oa.dashboard"))
 
     if SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id, junior_oa_id=junior_id).first():
@@ -135,13 +130,14 @@ def remove_junior(junior_id):
     return redirect(url_for("senior_oa.dashboard"))
 
 
-@senior_oa_bp.route("/create_annotator", methods=["POST"])
+@senior_oa_bp.route("/create_junior", methods=["POST"])
 @role_required("senior_oa")
-def create_annotator():
-    """Create an annotator account owned by this Senior OA.
+def create_junior():
+    """Create a Junior OA account owned by this Senior OA.
 
-    Ownership is what scopes the account: only Junior OAs overseen by this
-    senior will see the new annotator in their "Add Annotator" picker.
+    Ownership is what scopes the account: only the senior who created a Junior
+    OA can add them to their team, and the new account is added straight away
+    so it is immediately usable.
     """
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
@@ -158,46 +154,13 @@ def create_annotator():
         flash(f"Username '{username}' is already taken.", "danger")
         return redirect(url_for("senior_oa.dashboard"))
 
-    user = User(username=username, role="annotator", senior_oa_id=current_user.id)
+    user = User(username=username, role="junior_oa", senior_oa_id=current_user.id)
     user.set_password(password)
     db.session.add(user)
+    db.session.flush()          # need the id for the team link below
+    db.session.add(SeniorJuniorOa(senior_oa_id=current_user.id, junior_oa_id=user.id))
     db.session.commit()
-    flash(f"Annotator '{username}' created under your account.", "success")
-    return redirect(url_for("senior_oa.dashboard"))
-
-
-@senior_oa_bp.route("/remove_annotator/<int:annotator_id>", methods=["POST"])
-@role_required("senior_oa")
-def remove_annotator(annotator_id):
-    """Release an annotator from this senior's account.
-
-    The account is kept (only an admin deletes users) but it stops being
-    visible to this senior's juniors, and its unfinished work returns to the
-    junior's unassigned pool. Annotated/approved work keeps its annotator
-    reference so nothing already done is lost.
-    """
-    user = User.query.filter_by(
-        id=annotator_id, role="annotator", senior_oa_id=current_user.id
-    ).first()
-    if not user:
-        flash("Annotator not found under your account.", "danger")
-        return redirect(url_for("senior_oa.dashboard"))
-
-    junior_ids = _managed_junior_ids()
-    if junior_ids:
-        WorkItem.query.filter(
-            WorkItem.oa_id.in_(junior_ids),
-            WorkItem.annotator_id == annotator_id,
-            WorkItem.status.in_(["pending", "rejected"])
-        ).update({"annotator_id": None}, synchronize_session=False)
-        OaAnnotator.query.filter(
-            OaAnnotator.annotator_id == annotator_id,
-            OaAnnotator.oa_id.in_(junior_ids)
-        ).delete(synchronize_session=False)
-
-    user.senior_oa_id = None
-    db.session.commit()
-    flash(f"Annotator '{user.username}' released from your account.", "success")
+    flash(f"Junior OA '{username}' created and added to your team.", "success")
     return redirect(url_for("senior_oa.dashboard"))
 
 

@@ -99,14 +99,14 @@ def dashboard():
                if u.senior_oa_id and User.query.get(u.senior_oa_id) else None)
         for u in users
     }
-    # Annotators nobody owns — invisible to every Junior OA until assigned.
-    unowned_annotators = [
-        u for u in users if u.role == "annotator" and not u.senior_oa_id
+    # Junior OAs nobody owns — no Senior OA can add them to a team until assigned.
+    unowned_juniors = [
+        u for u in users if u.role == "junior_oa" and not u.senior_oa_id
     ]
 
     return render_template("admin/dashboard.html",
         users=users, oas=oas, junior_oas=junior_oas, senior_oas=senior_oas,
-        owner_names=owner_names, unowned_annotators=unowned_annotators,
+        owner_names=owner_names, unowned_juniors=unowned_juniors,
         s3_bucket=s3_bucket,
         assigned_prefixes=assigned_prefixes,
         total_distributed=total_distributed,
@@ -212,9 +212,9 @@ def create_user():
 
     user = User(username=username, role=role)
 
-    # Annotators may be created directly under a Senior OA. Without an owner the
-    # account exists but no Junior OA can pick it up, so warn when that happens.
-    if role == "annotator":
+    # Junior OAs may be created directly under a Senior OA. Without an owner the
+    # account exists but no senior can add it to a team, so warn when that happens.
+    if role == "junior_oa":
         senior_id = request.form.get("senior_oa_id", type=int)
         if senior_id:
             senior = User.query.get(senior_id)
@@ -227,30 +227,30 @@ def create_user():
     db.session.add(user)
     db.session.commit()
 
-    if role == "annotator" and not user.senior_oa_id:
-        flash(f"User '{username}' created as annotator with no Senior OA — "
-              "assign an owner before a Junior OA can add them.", "warning")
+    if role == "junior_oa" and not user.senior_oa_id:
+        flash(f"User '{username}' created as Junior OA with no Senior OA — "
+              "assign an owner before a senior can add them to a team.", "warning")
     else:
         flash(f"User '{username}' created as {role}.", "success")
     return redirect(url_for("admin.dashboard"))
 
 
-@admin_bp.route("/assign_annotator_owner", methods=["POST"])
+@admin_bp.route("/assign_junior_owner", methods=["POST"])
 @role_required("admin")
-def assign_annotator_owner():
-    """Set (or clear) the Senior OA that owns an annotator account."""
-    annotator_id = request.form.get("annotator_id", type=int)
+def assign_junior_owner():
+    """Set (or clear) the Senior OA that owns a Junior OA account."""
+    junior_id = request.form.get("junior_id", type=int)
     senior_id = request.form.get("senior_oa_id", type=int)
 
-    user = User.query.filter_by(id=annotator_id, role="annotator").first()
+    user = User.query.filter_by(id=junior_id, role="junior_oa").first()
     if not user:
-        flash("Invalid annotator.", "danger")
+        flash("Invalid Junior OA.", "danger")
         return redirect(url_for("admin.dashboard"))
 
     if not senior_id:
         user.senior_oa_id = None
         db.session.commit()
-        flash(f"Annotator '{user.username}' is now unowned.", "success")
+        flash(f"Junior OA '{user.username}' is now unowned.", "success")
         return redirect(url_for("admin.dashboard"))
 
     senior = User.query.filter_by(id=senior_id, role="senior_oa").first()
@@ -260,7 +260,7 @@ def assign_annotator_owner():
 
     user.senior_oa_id = senior.id
     db.session.commit()
-    flash(f"Annotator '{user.username}' assigned to '{senior.username}'.", "success")
+    flash(f"Junior OA '{user.username}' assigned to '{senior.username}'.", "success")
     return redirect(url_for("admin.dashboard"))
 
 

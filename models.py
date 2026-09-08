@@ -15,12 +15,13 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 'admin', 'junior_oa', 'senior_oa', 'annotator'
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    # Senior OA who owns this annotator. Set when a Senior OA creates the account.
-    # NULL = unowned (self-registered, or created by an admin without picking a senior);
-    # unowned annotators are invisible to Junior OAs until an admin assigns an owner.
+    # Senior OA who owns this Junior OA. Set when a Senior OA creates the account.
+    # NULL = unowned (created by an admin without picking a senior); an unowned
+    # Junior OA cannot be added to any senior's team until an admin assigns one.
+    # Only meaningful for role='junior_oa'.
     senior_oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
-    senior_oa = db.relationship("User", remote_side=[id], backref="owned_annotators")
+    senior_oa = db.relationship("User", remote_side=[id], backref="owned_juniors")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
