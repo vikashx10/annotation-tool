@@ -50,6 +50,63 @@ def _migrate_db(app):
             except Exception:
                 pass
 
+        # users.senior_oa_id is added in models._add_missing_columns(), which runs
+        # before any ORM query. Only the data backfill belongs here.
+        _backfill_junior_oa_owner()
+
+
+# Senior OA that pre-existing Junior OAs are handed to when the ownership
+# column is first introduced. Override per-environment if needed.
+BACKFILL_SENIOR_USERNAME = os.environ.get(
+    "SENIOR_OA_BACKFILL_USERNAME", "demo_senior_oa"
+).strip()
+
+# Config key marking the Junior OA backfill as already applied.
+_JUNIOR_BACKFILL_FLAG = "migration:junior_oa_owner_backfill"
+
+
+def _backfill_junior_oa_owner():
+    """One-time: hand every pre-existing Junior OA to BACKFILL_SENIOR_USERNAME.
+
+    Also clears any annotator ownership left over from the earlier revision of
+    this feature, when senior_oa_id briefly scoped annotators instead. Junior
+    OA pickers no longer consult it, so a stale owner there would only mislead.
+
+    Runs at most once per database — guarded by a row in `config` — so Junior
+    OAs created later are NOT swept into the same senior on the next restart.
+    """
+    from models import Config, User
+
+    if Config.query.get(_JUNIOR_BACKFILL_FLAG):
+        return
+
+    senior = User.query.filter_by(
+        username=BACKFILL_SENIOR_USERNAME, role="senior_oa"
+    ).first()
+    if not senior:
+        # Senior does not exist yet (fresh DB, or seeded later). Leave the flag
+        # unset so the backfill still runs once that account shows up.
+        print(f"[migrate] senior OA '{BACKFILL_SENIOR_USERNAME}' not found — "
+              "Junior OA backfill deferred")
+        return
+
+    cleared = User.query.filter(
+        User.role == "annotator",
+        User.senior_oa_id.isnot(None),
+    ).update({"senior_oa_id": None}, synchronize_session=False)
+
+    updated = User.query.filter(
+        User.role == "junior_oa",
+        User.senior_oa_id.is_(None),
+    ).update({"senior_oa_id": senior.id}, synchronize_session=False)
+
+    db.session.add(Config(key=_JUNIOR_BACKFILL_FLAG, value=str(senior.id)))
+    db.session.commit()
+    print(f"[migrate] assigned {updated} existing Junior OA(s) to "
+          f"'{BACKFILL_SENIOR_USERNAME}'")
+    if cleared:
+        print(f"[migrate] cleared stale annotator ownership on {cleared} row(s)")
+
 
 def create_app():
     app = Flask(__name__)

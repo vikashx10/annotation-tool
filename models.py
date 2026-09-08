@@ -15,6 +15,13 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False)  # 'admin', 'junior_oa', 'senior_oa', 'annotator'
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    # Senior OA who owns this Junior OA. Set when a Senior OA creates the account.
+    # NULL = unowned (created by an admin without picking a senior); an unowned
+    # Junior OA cannot be added to any senior's team until an admin assigns one.
+    # Only meaningful for role='junior_oa'.
+    senior_oa_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    senior_oa = db.relationship("User", remote_side=[id], backref="owned_juniors")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -126,13 +133,32 @@ def init_db(app):
 
 
 def _add_missing_columns():
-    """Add columns that may not exist in older databases."""
+    """Add columns that may not exist in older databases.
+
+    Runs before any ORM query (see init_db) so that models carrying newer
+    columns can still be SELECTed against an older schema.
+    """
     for col in ("reject_reason", "model_note"):
+        _try_add_column("work_items", col, "TEXT")
+
+    # Senior OA that owns an annotator account.
+    _try_add_column("users", "senior_oa_id", "INTEGER REFERENCES users(id)")
+
+
+def _try_add_column(table, column, definition):
+    """Idempotently add a column. No-op if it already exists.
+
+    Tries the Postgres `IF NOT EXISTS` form first, then the plain form so the
+    same call works against SQLite, which has no `IF NOT EXISTS` for ADD COLUMN.
+    """
+    for sql in (
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}",
+        f"ALTER TABLE {table} ADD COLUMN {column} {definition}",
+    ):
         try:
-            db.session.execute(db.text(
-                f"ALTER TABLE work_items ADD COLUMN IF NOT EXISTS {col} TEXT"
-            ))
+            db.session.execute(db.text(sql))
             db.session.commit()
+            return
         except Exception:
             db.session.rollback()
 

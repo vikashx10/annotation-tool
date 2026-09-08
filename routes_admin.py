@@ -91,9 +91,22 @@ def dashboard():
     }
 
     junior_oas = [o for o in oas if o.role == "junior_oa"]
+    senior_oas = [o for o in oas if o.role == "senior_oa"]
+
+    # Owner username per user id, for the user table.
+    owner_names = {
+        u.id: (User.query.get(u.senior_oa_id).username
+               if u.senior_oa_id and User.query.get(u.senior_oa_id) else None)
+        for u in users
+    }
+    # Junior OAs nobody owns — no Senior OA can add them to a team until assigned.
+    unowned_juniors = [
+        u for u in users if u.role == "junior_oa" and not u.senior_oa_id
+    ]
 
     return render_template("admin/dashboard.html",
-        users=users, oas=oas, junior_oas=junior_oas,
+        users=users, oas=oas, junior_oas=junior_oas, senior_oas=senior_oas,
+        owner_names=owner_names, unowned_juniors=unowned_juniors,
         s3_bucket=s3_bucket,
         assigned_prefixes=assigned_prefixes,
         total_distributed=total_distributed,
@@ -198,10 +211,56 @@ def create_user():
         return redirect(url_for("admin.dashboard"))
 
     user = User(username=username, role=role)
+
+    # Junior OAs may be created directly under a Senior OA. Without an owner the
+    # account exists but no senior can add it to a team, so warn when that happens.
+    if role == "junior_oa":
+        senior_id = request.form.get("senior_oa_id", type=int)
+        if senior_id:
+            senior = User.query.get(senior_id)
+            if not senior or senior.role != "senior_oa":
+                flash("Invalid Senior OA owner.", "danger")
+                return redirect(url_for("admin.dashboard"))
+            user.senior_oa_id = senior_id
+
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
-    flash(f"User '{username}' created as {role}.", "success")
+
+    if role == "junior_oa" and not user.senior_oa_id:
+        flash(f"User '{username}' created as Junior OA with no Senior OA — "
+              "assign an owner before a senior can add them to a team.", "warning")
+    else:
+        flash(f"User '{username}' created as {role}.", "success")
+    return redirect(url_for("admin.dashboard"))
+
+
+@admin_bp.route("/assign_junior_owner", methods=["POST"])
+@role_required("admin")
+def assign_junior_owner():
+    """Set (or clear) the Senior OA that owns a Junior OA account."""
+    junior_id = request.form.get("junior_id", type=int)
+    senior_id = request.form.get("senior_oa_id", type=int)
+
+    user = User.query.filter_by(id=junior_id, role="junior_oa").first()
+    if not user:
+        flash("Invalid Junior OA.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    if not senior_id:
+        user.senior_oa_id = None
+        db.session.commit()
+        flash(f"Junior OA '{user.username}' is now unowned.", "success")
+        return redirect(url_for("admin.dashboard"))
+
+    senior = User.query.filter_by(id=senior_id, role="senior_oa").first()
+    if not senior:
+        flash("Invalid Senior OA.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    user.senior_oa_id = senior.id
+    db.session.commit()
+    flash(f"Junior OA '{user.username}' assigned to '{senior.username}'.", "success")
     return redirect(url_for("admin.dashboard"))
 
 
@@ -240,12 +299,23 @@ def delete_user(user_id):
             (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
         ).delete()
         SeniorJuniorOa.query.filter_by(junior_oa_id=user_id).delete()
+        User.query.filter_by(senior_oa_id=user_id).update(
+            {"senior_oa_id": None}, synchronize_session=False
+        )
 
     elif user.role == "senior_oa":
         # Just remove their senior links — junior OAs and their work are unaffected.
         SeniorJuniorOa.query.filter_by(senior_oa_id=user_id).delete()
+        # Release annotators they own, otherwise the users.senior_oa_id foreign
+        # key blocks the delete. The accounts survive, unowned.
+        User.query.filter_by(senior_oa_id=user_id).update(
+            {"senior_oa_id": None}, synchronize_session=False
+        )
 
     else:  # admin — no work items owned, just clean up any OA links
+        User.query.filter_by(senior_oa_id=user_id).update(
+            {"senior_oa_id": None}, synchronize_session=False
+        )
         OaAnnotator.query.filter(
             (OaAnnotator.oa_id == user_id) | (OaAnnotator.annotator_id == user_id)
         ).delete()
