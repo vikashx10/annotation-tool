@@ -121,11 +121,28 @@
             <button type="submit" class="btn-primary">Create Junior OA</button>
         </form>
 
+        {% if available_juniors %}
+        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}"
+              style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:16px;
+                     padding-top:14px; border-top:1px solid #e5e7eb;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Or add one you already created</label>
+                <select name="junior_id" style="width:220px;">
+                    {% for j in available_juniors %}
+                    <option value="{{ j.id }}">{{ j.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn-primary">Add</button>
+        </form>
+        {% endif %}
+
         {% if owned_junior_stats %}
         <table>
             <thead>
                 <tr>
                     <th>Junior OA</th>
+                    <th>On My Team</th>
                     <th>Annotators</th>
                     <th>Images</th>
                     <th>Actions</th>
@@ -135,6 +152,10 @@
                 {% for stat in owned_junior_stats %}
                 <tr>
                     <td>{{ stat.user.username }}</td>
+                    <td>
+                        {% if stat.on_team %}<span class="badge badge-approved">yes</span>
+                        {% else %}<span style="color:#6c757d;">not added</span>{% endif %}
+                    </td>
                     <td>{{ stat.annotators }}</td>
                     <td>{{ stat.work_items }}</td>
                     <td>

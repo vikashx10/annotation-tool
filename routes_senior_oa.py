@@ -66,12 +66,19 @@ def dashboard():
             "total": total,
         })
 
+    # Juniors this senior created who are not on their team yet. Creating one
+    # links it immediately, so this is normally empty — it fills up when an
+    # admin assigns ownership of an existing account.
+    on_team = set(junior_ids)
+    available_juniors = [j for j in owned_juniors if j.id not in on_team]
+
     # NOTE: no key here may be named `items`/`keys`/`values` — in Jinja a dict
     # attribute lookup finds the built-in method before the key, so `stat.items`
     # would render "<built-in method items of dict object ...>".
     owned_junior_stats = [
         {
             "user": j,
+            "on_team": j.id in on_team,
             "annotators": OaAnnotator.query.filter_by(oa_id=j.id).count(),
             "work_items": WorkItem.query.filter_by(oa_id=j.id).count(),
         }
@@ -82,10 +89,38 @@ def dashboard():
         managed_juniors=managed_juniors,
         junior_stats=junior_stats,
         owned_junior_stats=owned_junior_stats,
+        available_juniors=available_juniors,
         to_review=to_review,
         total_approved=total_approved,
         total_sent_back=total_sent_back,
     )
+
+
+@senior_oa_bp.route("/add_junior", methods=["POST"])
+@role_required("senior_oa")
+def add_junior():
+    """Add a Junior OA this senior created to their team."""
+    junior_id = request.form.get("junior_id", type=int)
+    if not junior_id:
+        flash("Select a Junior OA.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    user = User.query.filter_by(
+        id=junior_id, role="junior_oa", senior_oa_id=current_user.id
+    ).first()
+    if not user:
+        flash("That Junior OA was not created by you.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    if SeniorJuniorOa.query.filter_by(
+            senior_oa_id=current_user.id, junior_oa_id=junior_id).first():
+        flash("Already on your team.", "warning")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    db.session.add(SeniorJuniorOa(senior_oa_id=current_user.id, junior_oa_id=junior_id))
+    db.session.commit()
+    flash(f"Added Junior OA '{user.username}'.", "success")
+    return redirect(url_for("senior_oa.dashboard"))
 
 
 @senior_oa_bp.route("/create_junior", methods=["POST"])
