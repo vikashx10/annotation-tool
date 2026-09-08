@@ -121,21 +121,32 @@
             <button type="submit" class="btn-primary">Create Junior OA</button>
         </form>
 
-        {% if available_juniors %}
-        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}"
-              style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:16px;
-                     padding-top:14px; border-top:1px solid #e5e7eb;">
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Or add one you already created</label>
-                <select name="junior_id" style="width:220px;">
-                    {% for j in available_juniors %}
-                    <option value="{{ j.id }}">{{ j.username }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="btn-primary">Add</button>
-        </form>
-        {% endif %}
+        <div style="padding-top:14px; border-top:1px solid #e5e7eb; margin-bottom:16px;">
+            <form method="POST" action="{{ url_for('senior_oa.add_junior') }}"
+                  style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Or add one you already created</label>
+                    <select name="junior_id" style="width:220px;"
+                            {% if not available_juniors %}disabled{% endif %}>
+                        {% for j in available_juniors %}
+                        <option value="{{ j.id }}">{{ j.username }}</option>
+                        {% else %}
+                        <option value="">— none available —</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn-primary"
+                        {% if not available_juniors %}disabled style="opacity:0.5; cursor:not-allowed;"{% endif %}>
+                    Add
+                </button>
+            </form>
+            {% if not available_juniors %}
+            <p style="color:#6c757d; font-size:0.82rem; margin:8px 0 0;">
+                Every Junior OA you created is already on your team. Create a new
+                one above, or ask an admin to assign you an existing account.
+            </p>
+            {% endif %}
+        </div>
 
         {% if owned_junior_stats %}
         <table>
