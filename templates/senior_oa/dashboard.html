@@ -92,12 +92,6 @@
                             Review ({{ stat.awaiting }})
                         </a>
                         {% endif %}
-                        <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">
-                            <button type="submit" class="btn-danger btn-sm"
-                                onclick="return confirm('Remove {{ stat.user.username }} from your managed list?');">
-                                Remove
-                            </button>
-                        </form>
                     </td>
                 </tr>
                 {% endfor %}
@@ -110,8 +104,8 @@
     <div class="card">
         <h3>My Junior OAs{% if owned_junior_stats %} ({{ owned_junior_stats | length }}){% endif %}</h3>
         <p style="color:#6c757d; font-size:0.86rem; margin-top:-4px;">
-            Junior OAs you create belong to your account. Only Junior OAs you
-            created can be added to your team.
+            Junior OAs you create belong to your account and are added to your
+            team straight away. You can only see and delete the ones you created.
         </p>
 
         <form method="POST" action="{{ url_for('senior_oa.create_junior') }}"
@@ -132,7 +126,6 @@
             <thead>
                 <tr>
                     <th>Junior OA</th>
-                    <th>On My Team</th>
                     <th>Annotators</th>
                     <th>Images</th>
                     <th>Actions</th>
@@ -142,29 +135,15 @@
                 {% for stat in owned_junior_stats %}
                 <tr>
                     <td>{{ stat.user.username }}</td>
-                    <td>
-                        {% if stat.on_team %}
-                            <span class="badge badge-approved">yes</span>
-                        {% else %}
-                            <span style="color:#6c757d;">not added</span>
-                        {% endif %}
-                    </td>
                     <td>{{ stat.annotators }}</td>
-                    <td>{{ stat.items }}</td>
+                    <td>{{ stat.work_items }}</td>
                     <td>
-                        {% if not stat.on_team %}
-                        <form method="POST" action="{{ url_for('senior_oa.add_junior') }}" style="display:inline;">
-                            <input type="hidden" name="junior_id" value="{{ stat.user.id }}">
-                            <button type="submit" class="btn-primary btn-sm">Add to Team</button>
-                        </form>
-                        {% else %}
-                        <form method="POST" action="{{ url_for('senior_oa.remove_junior', junior_id=stat.user.id) }}" style="display:inline;">
+                        <form method="POST" action="{{ url_for('senior_oa.delete_junior', junior_id=stat.user.id) }}" style="display:inline;">
                             <button type="submit" class="btn-danger btn-sm"
-                                onclick="return confirm('Remove {{ stat.user.username }} from your team? They keep their account and work.');">
-                                Remove from Team
+                                onclick="return confirm('Delete Junior OA {{ stat.user.username }}? Their reviewed work is kept, but any images not yet annotated are released.');">
+                                Delete
                             </button>
                         </form>
-                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import current_user
-from models import db, User, OaAnnotator, SeniorJuniorOa, WorkItem, Annotation
+from models import db, User, OaAnnotator, OaCursor, SeniorJuniorOa, WorkItem, Annotation
 from auth import role_required
 from s3_service import put_object
 
@@ -20,11 +20,11 @@ def dashboard():
     junior_ids = [l.junior_oa_id for l in links]
     managed_juniors = User.query.filter(User.id.in_(junior_ids)).all() if junior_ids else []
 
-    # Only Junior OAs this senior created (owns) can be added to their team.
+    # Junior OAs this senior created. Creating one links it to the team, so this
+    # is also the set they oversee.
     owned_juniors = User.query.filter_by(
         role="junior_oa", senior_oa_id=current_user.id
     ).order_by(User.username).all()
-    available_juniors = [j for j in owned_juniors if j.id not in junior_ids]
 
     # Queue: junior_approved items from managed junior OAs
     to_review = (
@@ -66,68 +66,26 @@ def dashboard():
             "total": total,
         })
 
-    # Every Junior OA this senior owns, whether or not they are on the team yet.
-    managed_ids = set(junior_ids)
+    # NOTE: no key here may be named `items`/`keys`/`values` — in Jinja a dict
+    # attribute lookup finds the built-in method before the key, so `stat.items`
+    # would render "<built-in method items of dict object ...>".
     owned_junior_stats = [
         {
             "user": j,
-            "on_team": j.id in managed_ids,
             "annotators": OaAnnotator.query.filter_by(oa_id=j.id).count(),
-            "items": WorkItem.query.filter_by(oa_id=j.id).count(),
+            "work_items": WorkItem.query.filter_by(oa_id=j.id).count(),
         }
         for j in owned_juniors
     ]
 
     return render_template("senior_oa/dashboard.html",
         managed_juniors=managed_juniors,
-        available_juniors=available_juniors,
         junior_stats=junior_stats,
         owned_junior_stats=owned_junior_stats,
         to_review=to_review,
         total_approved=total_approved,
         total_sent_back=total_sent_back,
     )
-
-
-@senior_oa_bp.route("/add_junior", methods=["POST"])
-@role_required("senior_oa")
-def add_junior():
-    junior_id = request.form.get("junior_id", type=int)
-    if not junior_id:
-        flash("Select a Junior OA.", "danger")
-        return redirect(url_for("senior_oa.dashboard"))
-
-    user = User.query.get(junior_id)
-    if not user or user.role != "junior_oa":
-        flash("Invalid Junior OA.", "danger")
-        return redirect(url_for("senior_oa.dashboard"))
-
-    # A senior may only add Junior OAs they created.
-    if user.senior_oa_id != current_user.id:
-        flash("That Junior OA was not created by you.", "danger")
-        return redirect(url_for("senior_oa.dashboard"))
-
-    if SeniorJuniorOa.query.filter_by(senior_oa_id=current_user.id, junior_oa_id=junior_id).first():
-        flash("Already managing this Junior OA.", "warning")
-        return redirect(url_for("senior_oa.dashboard"))
-
-    db.session.add(SeniorJuniorOa(senior_oa_id=current_user.id, junior_oa_id=junior_id))
-    db.session.commit()
-    flash(f"Added Junior OA '{user.username}'.", "success")
-    return redirect(url_for("senior_oa.dashboard"))
-
-
-@senior_oa_bp.route("/remove_junior/<int:junior_id>", methods=["POST"])
-@role_required("senior_oa")
-def remove_junior(junior_id):
-    link = SeniorJuniorOa.query.filter_by(
-        senior_oa_id=current_user.id, junior_oa_id=junior_id
-    ).first()
-    if link:
-        db.session.delete(link)
-        db.session.commit()
-        flash("Junior OA removed.", "success")
-    return redirect(url_for("senior_oa.dashboard"))
 
 
 @senior_oa_bp.route("/create_junior", methods=["POST"])
@@ -161,6 +119,46 @@ def create_junior():
     db.session.add(SeniorJuniorOa(senior_oa_id=current_user.id, junior_oa_id=user.id))
     db.session.commit()
     flash(f"Junior OA '{username}' created and added to your team.", "success")
+    return redirect(url_for("senior_oa.dashboard"))
+
+
+@senior_oa_bp.route("/delete_junior/<int:junior_id>", methods=["POST"])
+@role_required("senior_oa")
+def delete_junior(junior_id):
+    """Delete a Junior OA account this senior created.
+
+    Mirrors admin.delete_user's junior_oa branch: finished work is preserved
+    with its oa_id cleared so it still exports, un-annotated work is dropped,
+    and the S3 prefixes are freed for reassignment.
+    """
+    user = User.query.filter_by(
+        id=junior_id, role="junior_oa", senior_oa_id=current_user.id
+    ).first()
+    if not user:
+        flash("That Junior OA was not created by you.", "danger")
+        return redirect(url_for("senior_oa.dashboard"))
+
+    username = user.username
+
+    # Keep anything annotated or beyond — it still has to export.
+    WorkItem.query.filter(
+        WorkItem.oa_id == junior_id,
+        WorkItem.status.in_(["annotated", "junior_approved", "approved"])
+    ).update({"oa_id": None, "annotator_id": None}, synchronize_session=False)
+
+    # Nothing of value in un-annotated work.
+    WorkItem.query.filter(
+        WorkItem.oa_id == junior_id,
+        WorkItem.status.in_(["pending", "rejected", "rejected_by_senior"])
+    ).delete(synchronize_session=False)
+
+    OaCursor.query.filter_by(oa_id=junior_id).delete(synchronize_session=False)
+    OaAnnotator.query.filter_by(oa_id=junior_id).delete(synchronize_session=False)
+    SeniorJuniorOa.query.filter_by(junior_oa_id=junior_id).delete(synchronize_session=False)
+
+    db.session.delete(user)
+    db.session.commit()
+    flash(f"Junior OA '{username}' deleted.", "success")
     return redirect(url_for("senior_oa.dashboard"))
 
 
