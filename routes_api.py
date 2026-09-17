@@ -2,11 +2,12 @@ import io
 import os
 import hashlib
 from datetime import datetime, timezone
-from flask import Blueprint, jsonify, request, redirect, Response
+from flask import Blueprint, jsonify, request, redirect, Response, current_app
 from flask_login import login_required, current_user
 from PIL import Image
 from models import db, WorkItem, Annotation, PreAnnotation
 from auth import role_required
+from validation import validate
 from s3_service import generate_presigned_url, get_object_bytes, put_object, object_exists, list_s3_folders
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -299,6 +300,22 @@ def review_image(image_id):
             item.reviewed_at = datetime.now(timezone.utc)
             db.session.commit()
         else:  # approve
+            # Nothing is saved and the status is untouched until the page passes.
+            try:
+                issues = validate(
+                    annotations,
+                    lambda: get_object_bytes(_get_bucket(), item.s3_key),
+                    current_app.config.get("CLASS_NAMES", ()),
+                )
+            except ValueError as e:
+                return jsonify({"status": "error", "message": str(e)}), 400
+            if issues:
+                return jsonify({
+                    "status": "validation_failed",
+                    "message": f"{len(issues)} issue(s) to fix before approving",
+                    "issues": issues,
+                }), 422
+
             _save_annotations_for_key(item.s3_key, annotations)
             item.status = "junior_approved"
             item.reject_reason = None

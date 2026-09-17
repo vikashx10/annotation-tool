@@ -32,6 +32,7 @@ class AnnotationCanvas {
         this.startX = 0;
         this.startY = 0;
         this.pendingBox = null;
+        this.issueBoxes = new Set();   // annotation indexes flagged by validation
 
         this.zoom = 1;
         this.minZoom = 0.3;
@@ -243,6 +244,7 @@ class AnnotationCanvas {
     async loadImage(imageId) {
         this.currentImageId = imageId;
         this.pendingBox = null;
+        this.issueBoxes.clear();
         this.zoom = 1;
 
         // Fetch annotations
@@ -284,7 +286,7 @@ class AnnotationCanvas {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-        annotations.forEach((ann) => {
+        annotations.forEach((ann, idx) => {
             const x = (ann.x_center - ann.width / 2) * canvas.width;
             const y = (ann.y_center - ann.height / 2) * canvas.height;
             const w = ann.width * canvas.width;
@@ -294,6 +296,17 @@ class AnnotationCanvas {
             ctx.strokeStyle = color;
             ctx.lineWidth = 3;
             ctx.strokeRect(x, y, w, h);
+
+            // Validation issue: red wash + dashed red outline over the class colour
+            if (this.issueBoxes.has(idx)) {
+                ctx.fillStyle = 'rgba(220, 53, 69, 0.18)';
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeStyle = '#dc3545';
+                ctx.lineWidth = 4;
+                ctx.setLineDash([10, 6]);
+                ctx.strokeRect(x - 4, y - 4, w + 8, h + 8);
+                ctx.setLineDash([]);
+            }
 
             // Draw class label
             const label = this.classNames[ann.class_id] || `Class ${ann.class_id}`;
@@ -376,6 +389,10 @@ class AnnotationCanvas {
             const normalizedX = canvasX / this.canvas.width;
             const normalizedY = canvasY / this.canvas.height;
 
+            // When boxes overlap, pick the SMALLEST one under the cursor — otherwise
+            // a box nested inside / under a bigger one can never be selected.
+            let hit = -1;
+            let hitArea = Infinity;
             for (let i = this.annotations.length - 1; i >= 0; i--) {
                 const ann = this.annotations[i];
                 const boxX = ann.x_center - ann.width / 2;
@@ -384,11 +401,15 @@ class AnnotationCanvas {
                 const boxY2 = ann.y_center + ann.height / 2;
 
                 if (normalizedX >= boxX && normalizedX <= boxX2 &&
-                    normalizedY >= boxY && normalizedY <= boxY2) {
-                    this._selectedAnnotationIndex = i;
-                    this._showRelabelSelector(i);
-                    break;
+                    normalizedY >= boxY && normalizedY <= boxY2 &&
+                    ann.width * ann.height < hitArea) {
+                    hit = i;
+                    hitArea = ann.width * ann.height;
                 }
+            }
+            if (hit >= 0) {
+                this._selectedAnnotationIndex = hit;
+                this._showRelabelSelector(hit);
             }
         } else {
             this.pendingBox = null;
@@ -617,6 +638,7 @@ class AnnotationCanvas {
          */
         this.currentImageId = imageId;
         this.pendingBox = null;
+        this.issueBoxes.clear();
         this.zoom = 1;
         this.annotations = JSON.parse(JSON.stringify(annotations)); // deep copy
         this.image = imgElement;
@@ -635,7 +657,18 @@ class AnnotationCanvas {
         }
     }
 
+    setIssueBoxes(indexes) {
+        /** Highlight the annotations at these indexes as failing validation. */
+        this.issueBoxes = new Set(indexes || []);
+        this.draw();
+    }
+
     _notifyChanged() {
+        // Any edit shifts indexes / may fix the issue — highlights are stale.
+        if (this.issueBoxes.size) {
+            this.issueBoxes.clear();
+            this.draw();
+        }
         if (this.onAnnotationsChanged) {
             this.onAnnotationsChanged(this.annotations);
         }

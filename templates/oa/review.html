@@ -21,8 +21,8 @@
                 style="flex:1; padding:6px 10px; border:1px solid #111; border-radius:4px; background:#fff; cursor:pointer; font-size:0.82rem;">
                 Draw <span class="kbd">D</span>
             </button>
-            <button onclick="ac.setDrawMode(false)"
-                style="flex:1; padding:6px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.82rem;">
+            <button id="selectBtn" onclick="setMode(false)"
+                style="flex:1; padding:6px 10px; border:1px solid #111; border-radius:4px; background:#fff; cursor:pointer; font-size:0.82rem;">
                 Select <span class="kbd">S</span>
             </button>
         </div>
@@ -48,6 +48,15 @@
             style="background:#dc3545; color:#fff; border:1px solid #dc3545; margin-top:6px; width:100%;">
             Reject → Annotator <span class="kbd">R</span>
         </button>
+
+        <!-- Validation issues (shown when approve is refused) -->
+        <div id="issuePanel" hidden
+            style="margin-top:10px; padding:8px 10px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; max-height:30vh; overflow-y:auto;">
+            <div style="font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#dc3545; margin-bottom:6px;">
+                Fix before approving <span id="issueCount" style="font-weight:400;"></span>
+            </div>
+            <div id="issueList" style="font-size:0.8rem;"></div>
+        </div>
 
         <!-- Annotation list -->
         <div style="border-top:1px solid var(--border); padding-top:10px; flex:1; overflow-y:auto; min-height:0; margin-top:10px;">
@@ -83,6 +92,7 @@
 <div class="overlay" id="overlay"></div>
 <div class="class-selector" id="classSelector">
     <div class="class-selector-buttons" id="classButtons"></div>
+    <button class="btn-secondary btn-sm" onclick="ac.cancelDrawing()" style="margin-top:8px;">Cancel <span class="kbd">Esc</span></button>
 </div>
 
 <script src="{{ url_for('static', filename='js/canvas.js') }}"></script>
@@ -115,14 +125,51 @@
         classNames: CLASS_NAMES,
         classColors: CLASS_COLORS,
         readOnly: false,
-        onAnnotationsChanged: () => renderAnnList(),
+        onAnnotationsChanged: () => { clearIssues(); renderAnnList(); },
     });
 
-    function toggleDraw() {
-        const on = ac.toggleDrawMode();
-        document.getElementById('drawBtn').style.background = on ? '#111' : '#fff';
-        document.getElementById('drawBtn').style.color = on ? '#fff' : '#111';
+    // ── Validation issues ────────────────────────────────────────────────────
+    let _issues = [];
+
+    function clearIssues() {
+        _issues = [];
+        document.getElementById('issuePanel').hidden = true;
+        ac.setIssueBoxes([]);
     }
+
+    function showIssues(issues) {
+        _issues = issues || [];
+        document.getElementById('issueCount').textContent = `(${_issues.length})`;
+        const list = document.getElementById('issueList');
+        list.innerHTML = '';
+        _issues.forEach((issue) => {
+            const row = document.createElement('div');
+            row.textContent = issue.message;
+            row.title = 'Click to highlight only these boxes';
+            row.style.cssText = 'padding:5px 0; border-top:1px solid #fecaca; cursor:pointer;';
+            row.onclick = () => ac.setIssueBoxes(issue.box_indexes);
+            list.appendChild(row);
+        });
+        document.getElementById('issuePanel').hidden = false;
+        ac.setIssueBoxes(_issues.flatMap((i) => i.box_indexes));
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    // Keeps both toolbar buttons in sync with the canvas mode, however it was changed.
+    function setMode(draw) {
+        ac.setDrawMode(draw);
+        const paint = (id, active) => {
+            const b = document.getElementById(id);
+            b.style.background = active ? '#111' : '#fff';
+            b.style.color = active ? '#fff' : '#111';
+        };
+        paint('drawBtn', draw);
+        paint('selectBtn', !draw);
+    }
+
+    function toggleDraw() { setMode(!ac.drawMode); }
+
+    document.getElementById('overlay').addEventListener('click', () => ac.cancelDrawing());
 
     function renderAnnList() {
         const anns = ac.getAnnotations();
@@ -208,6 +255,7 @@
             return;
         }
         currentImageId = imageId;
+        clearIssues();
 
         const cached = _cache.get(imageId);
         if (cached) {
@@ -247,6 +295,9 @@
                 showToast('All images reviewed!', 'success');
                 document.getElementById('reviewMeta').innerHTML = '<strong>All reviewed!</strong>';
                 currentImageId = null;
+            } else if (data.status === 'validation_failed') {
+                showIssues(data.issues);
+                showToast(data.message || 'Validation failed', 'error');
             } else {
                 showToast(data.message || 'Error', 'error');
             }
@@ -315,14 +366,18 @@
 
     document.addEventListener('keydown', async function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === 'Escape') { ac.cancelDrawing(); return; }
+        // Class picker is open — don't let A/R/arrows act on the page behind it.
+        if (document.getElementById('classSelector').classList.contains('show')) return;
         if (e.key === 'a' || e.key === 'A') doApprove();
         else if (e.key === 'r' || e.key === 'R') doReject();
         else if (e.key === 'd' || e.key === 'D') toggleDraw();
-        else if (e.key === 's' || e.key === 'S') { ac.setDrawMode(false); document.getElementById('drawBtn').style.background='#fff'; document.getElementById('drawBtn').style.color='#111'; }
+        else if (e.key === 's' || e.key === 'S') setMode(false);
         else if (e.key === 'ArrowRight') { e.preventDefault(); await goNext(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); await goPrev(); }
     });
 
+    setMode(false);
     loadImage(currentImageId);
 </script>
 {% endblock %}
